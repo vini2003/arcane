@@ -8,23 +8,12 @@ import dev.omega.arcane.reference.ExpressionBindingContext;
 import dev.omega.arcane.reference.FloatAccessor;
 import dev.omega.arcane.reference.ReferenceType;
 import org.openjdk.jmh.annotations.Benchmark;
-import org.openjdk.jmh.annotations.Fork;
-import org.openjdk.jmh.annotations.Measurement;
 import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
-import org.openjdk.jmh.annotations.Threads;
-import org.openjdk.jmh.annotations.Warmup;
 
-import java.util.concurrent.TimeUnit;
-
-@Warmup(iterations = 1, time = 5000, timeUnit = TimeUnit.MILLISECONDS)
-@Measurement(iterations = 5, time = 5000, timeUnit = TimeUnit.MILLISECONDS)
-@Fork(1)
-@Threads(1)
 @State(Scope.Benchmark)
 public class MolangEvaluationBenchmark {
-
     private static final String ARITHMETIC_EXPRESSION = "math.sin(45.0) + 3.0 * 5.0 - 2.0";
     private static final String QUERY_EXPRESSION = "math.cos(query.value) + math.cos(query.value) + math.cos(query.value)";
 
@@ -70,6 +59,19 @@ public class MolangEvaluationBenchmark {
     @Benchmark
     public float compiledQuery() {
         return compiledQuery.evaluate();
+    }
+
+    @Benchmark
+    public float nativeArithmetic() {
+        return (float) (Math.sin(Math.toRadians(45.0)) + 3.0 * 5.0 - 2.0);
+    }
+
+    @Benchmark
+    public float nativeQuery() {
+        float value = benchmarkContext.currentValue();
+        double radians = Math.toRadians(value);
+        double cosValue = Math.cos(radians);
+        return (float) (cosValue + cosValue + cosValue);
     }
 
     /**
