@@ -6,7 +6,7 @@ import dev.omega.arcane.ast.operator.AdditionExpression;
 import dev.omega.arcane.ast.operator.DivisionExpression;
 import dev.omega.arcane.ast.operator.MultiplicationExpression;
 import dev.omega.arcane.ast.operator.SubtractionExpression;
-import dev.omega.arcane.compiler.ExpressionCompiler;
+import dev.omega.arcane.compiler.Compiler;
 import dev.omega.arcane.reference.ReferenceType;
 import dev.omega.arcane.exception.MolangLexException;
 import dev.omega.arcane.exception.MolangParseException;
@@ -93,7 +93,7 @@ public class MolangParser {
         // If the caller does not want to use cache, parse and return early:
         if(!cache) {
             MolangExpression parsed = parse(MolangLexer.lex(input), simplify);
-            return compile ? ExpressionCompiler.compile(parsed) : parsed;
+            return compile ? Compiler.compile(parsed) : parsed;
         }
 
         // Check if we can avoid lexing & parsing by falling back to the cache.
@@ -108,7 +108,7 @@ public class MolangParser {
         @Nullable MolangExpression cached = cacheMap.get(input);
         if(cached == null) {
             MolangExpression parsed = parse(MolangLexer.lex(input), simplify);
-            cached = compile ? ExpressionCompiler.compile(parsed) : parsed;
+            cached = compile ? Compiler.compile(parsed) : parsed;
             cacheMap.put(input, cached);
         }
 
