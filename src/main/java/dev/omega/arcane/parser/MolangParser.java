@@ -6,6 +6,7 @@ import dev.omega.arcane.ast.operator.AdditionExpression;
 import dev.omega.arcane.ast.operator.DivisionExpression;
 import dev.omega.arcane.ast.operator.MultiplicationExpression;
 import dev.omega.arcane.ast.operator.SubtractionExpression;
+import dev.omega.arcane.codegen.ExpressionCompiler;
 import dev.omega.arcane.reference.ReferenceType;
 import dev.omega.arcane.exception.MolangLexException;
 import dev.omega.arcane.exception.MolangParseException;
@@ -29,9 +30,12 @@ public class MolangParser {
     public static final int FLAG_NONE = 0x00000000;
     public static final int FLAG_SIMPLIFY = 0x00000001;
     public static final int FLAG_CACHE = 0x00000100;
+    public static final int FLAG_COMPILE = 0x00010000;
 
     private static final Map<String, MolangExpression> AST_CACHE = new ConcurrentHashMap<>();
     private static final Map<String, MolangExpression> SIMPLIFIED_AST_CACHE = new ConcurrentHashMap<>();
+    private static final Map<String, MolangExpression> COMPILED_AST_CACHE = new ConcurrentHashMap<>();
+    private static final Map<String, MolangExpression> COMPILED_SIMPLIFIED_AST_CACHE = new ConcurrentHashMap<>();
 
     private final LexedMolang input;
     private int cursor = 0;
@@ -54,6 +58,11 @@ public class MolangParser {
     @ApiStatus.AvailableSince("1.0.0")
     public static MolangExpression parse(String input) throws MolangLexException, MolangParseException {
         return parse(input, FLAG_CACHE | FLAG_SIMPLIFY);
+    }
+
+    @ApiStatus.Experimental
+    public static MolangExpression parseCompiled(String input) throws MolangLexException, MolangParseException {
+        return parse(input, FLAG_CACHE | FLAG_SIMPLIFY | FLAG_COMPILE);
     }
 
     /**
@@ -79,19 +88,27 @@ public class MolangParser {
     public static MolangExpression parse(String input, int flags) throws MolangLexException, MolangParseException {
         boolean simplify = (flags & FLAG_SIMPLIFY) == FLAG_SIMPLIFY;
         boolean cache = (flags & FLAG_CACHE) == FLAG_CACHE;
+        boolean compile = (flags & FLAG_COMPILE) == FLAG_COMPILE;
 
         // If the caller does not want to use cache, parse and return early:
         if(!cache) {
-            return parse(MolangLexer.lex(input), simplify);
+            MolangExpression parsed = parse(MolangLexer.lex(input), simplify);
+            return compile ? ExpressionCompiler.compile(parsed) : parsed;
         }
 
         // Check if we can avoid lexing & parsing by falling back to the cache.
         // Pick cache based on whether simplify is set - we don't want non-simplified AST getting
         // returned to users asking for simplified cache.
-        var cacheMap = simplify ? SIMPLIFIED_AST_CACHE : AST_CACHE;
+        Map<String, MolangExpression> cacheMap;
+        if(compile) {
+            cacheMap = simplify ? COMPILED_SIMPLIFIED_AST_CACHE : COMPILED_AST_CACHE;
+        } else {
+            cacheMap = simplify ? SIMPLIFIED_AST_CACHE : AST_CACHE;
+        }
         @Nullable MolangExpression cached = cacheMap.get(input);
         if(cached == null) {
-            cached = parse(MolangLexer.lex(input), true);
+            MolangExpression parsed = parse(MolangLexer.lex(input), simplify);
+            cached = compile ? ExpressionCompiler.compile(parsed) : parsed;
             cacheMap.put(input, cached);
         }
 

@@ -2,6 +2,7 @@ package dev.omega.arcane.reference;
 
 import dev.omega.arcane.ast.MolangExpression;
 import dev.omega.arcane.ast.ObjectAwareExpression;
+import dev.omega.arcane.reference.BoundFloatAccessorExpression;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -39,6 +40,12 @@ public class ExpressionBindingContext {
     @ApiStatus.AvailableSince("1.0.0")
     public <T> ExpressionBindingContext registerReferenceResolver(ReferenceType type, String value, Class<T> objectClass, Function<T, ObjectAwareExpression<T>> mapper) {
         getTypeEvaluator(type).add(new FunctionBinder<>(objectClass, value, mapper));
+        return this;
+    }
+
+    @ApiStatus.Experimental
+    public <T> ExpressionBindingContext registerReferenceResolver(ReferenceType type, String value, Class<T> objectClass, FloatAccessor<T> accessor) {
+        getTypeEvaluator(type).add(new FloatAccessorBinder<>(objectClass, value, accessor));
         return this;
     }
 
@@ -116,6 +123,24 @@ public class ExpressionBindingContext {
         @Override
         public ObjectAwareExpression<T> bind(@Nullable T value) {
             return mapper.apply(value);
+        }
+    }
+
+    private record FloatAccessorBinder<T>(Class<T> value, String expression, FloatAccessor<T> accessor) implements Binder<T> {
+
+        @Override
+        public String getReferenceName() {
+            return expression;
+        }
+
+        @Override
+        public Class<T> getExpectedClass() {
+            return value;
+        }
+
+        @Override
+        public ObjectAwareExpression<T> bind(@Nullable T value) {
+            return new BoundFloatAccessorExpression<>(value, accessor);
         }
     }
 

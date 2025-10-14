@@ -1,10 +1,11 @@
 package dev.omega.arcane;
 
-import dev.omega.arcane.ast.MolangExpression;
 import dev.omega.arcane.exception.MolangException;
 import dev.omega.arcane.exception.MolangLexException;
 import dev.omega.arcane.exception.MolangParseException;
 import dev.omega.arcane.parser.MolangParser;
+import dev.omega.arcane.ast.MolangExpression;
+import dev.omega.arcane.codegen.ExpressionCompiler;
 import org.jetbrains.annotations.ApiStatus;
 
 import java.util.Random;
@@ -36,13 +37,13 @@ public class Molang {
      */
     @ApiStatus.AvailableSince("1.0.0")
     public static float evaluate(String input) throws MolangException {
-        return MolangParser.parse(input).evaluate();
+        return MolangParser.parseCompiled(input).evaluate();
     }
 
     @ApiStatus.AvailableSince("1.0.0")
     public static float evaluateUnchecked(String input) {
         try {
-            return MolangParser.parse(input).evaluate();
+            return MolangParser.parseCompiled(input).evaluate();
         } catch (MolangLexException | MolangParseException exception) {
             throw new RuntimeException(exception);
         }

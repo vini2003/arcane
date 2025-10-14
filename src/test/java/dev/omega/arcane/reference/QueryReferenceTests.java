@@ -1,11 +1,12 @@
 package dev.omega.arcane.reference;
 
 import dev.omega.arcane.ast.MolangExpression;
-import dev.omega.arcane.ast.ObjectAwareExpression;
 import dev.omega.arcane.ast.ReferenceExpression;
 import dev.omega.arcane.exception.MolangLexException;
 import dev.omega.arcane.exception.MolangParseException;
 import dev.omega.arcane.parser.MolangParser;
+import dev.omega.arcane.reference.BoundFloatAccessorExpression;
+import dev.omega.arcane.reference.FloatAccessor;
 import dev.omega.arcane.util.DummyEntityObject;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -17,12 +18,7 @@ public class QueryReferenceTests {
                     ReferenceType.QUERY,
                     "age",
                     DummyEntityObject.class,
-                    entity -> new ObjectAwareExpression<>(entity) {
-                        @Override
-                        public float evaluate() {
-                            return value.getAge();
-                        }
-                    }
+                    (FloatAccessor<DummyEntityObject>) entity -> entity.getAge()
             );
 
     @Test
@@ -37,6 +33,6 @@ public class QueryReferenceTests {
 
         // parse with respect to (1) context for mapping, and (2) entity for value
         MolangExpression expression = MolangParser.parse("query.age").bind(context, entity);
-        Assertions.assertInstanceOf(ObjectAwareExpression.class, expression);
+        Assertions.assertInstanceOf(BoundFloatAccessorExpression.class, expression);
     }
 }

@@ -1,12 +1,13 @@
 package dev.omega.arcane.ast.math;
 
 import dev.omega.arcane.Molang;
+import dev.omega.arcane.ast.ArithmeticExpression;
 import dev.omega.arcane.ast.MolangExpression;
 import dev.omega.arcane.reference.ExpressionBindingContext;
 
-public class MathExpression {
+public abstract class MathExpression {
 
-    public record Abs(MolangExpression input) implements MolangExpression {
+    public record Abs(MolangExpression input) implements MolangExpression, ArithmeticExpression {
 
         @Override
         public float evaluate() {
@@ -19,7 +20,7 @@ public class MathExpression {
         }
     }
 
-    public record Acos(MolangExpression input) implements MolangExpression {
+    public record Acos(MolangExpression input) implements MolangExpression, ArithmeticExpression {
 
         @Override
         public float evaluate() {
@@ -32,7 +33,7 @@ public class MathExpression {
         }
     }
 
-    public record Asin(MolangExpression input) implements MolangExpression {
+    public record Asin(MolangExpression input) implements MolangExpression, ArithmeticExpression {
 
         @Override
         public float evaluate() {
@@ -45,7 +46,7 @@ public class MathExpression {
         }
     }
 
-    public record Atan(MolangExpression input) implements MolangExpression {
+    public record Atan(MolangExpression input) implements MolangExpression, ArithmeticExpression {
 
         @Override
         public float evaluate() {
@@ -58,7 +59,7 @@ public class MathExpression {
         }
     }
 
-    public record Atan2(MolangExpression y, MolangExpression x) implements MolangExpression {
+    public record Atan2(MolangExpression y, MolangExpression x) implements MolangExpression, ArithmeticExpression {
 
         @Override
         public float evaluate() {
@@ -71,7 +72,7 @@ public class MathExpression {
         }
     }
 
-    public record Ceil(MolangExpression input) implements MolangExpression {
+    public record Ceil(MolangExpression input) implements MolangExpression, ArithmeticExpression {
 
         @Override
         public float evaluate() {
@@ -84,7 +85,7 @@ public class MathExpression {
         }
     }
 
-    public record Clamp(MolangExpression input, MolangExpression min, MolangExpression max) implements MolangExpression {
+    public record Clamp(MolangExpression input, MolangExpression min, MolangExpression max) implements MolangExpression, ArithmeticExpression {
 
         @Override
         public float evaluate() {
@@ -98,7 +99,7 @@ public class MathExpression {
         }
     }
 
-    public record Cos(MolangExpression input) implements MolangExpression {
+    public record Cos(MolangExpression input) implements MolangExpression, ArithmeticExpression {
 
         @Override
         public float evaluate() {
@@ -111,7 +112,7 @@ public class MathExpression {
         }
     }
 
-    public record DieRoll(MolangExpression num, MolangExpression low, MolangExpression high) implements MolangExpression {
+    public record DieRoll(MolangExpression num, MolangExpression low, MolangExpression high) implements MolangExpression, ArithmeticExpression {
 
         @Override
         public float evaluate() {
@@ -130,7 +131,7 @@ public class MathExpression {
         }
     }
 
-    public record DieRollInteger(MolangExpression num, MolangExpression low, MolangExpression high) implements MolangExpression {
+    public record DieRollInteger(MolangExpression num, MolangExpression low, MolangExpression high) implements MolangExpression, ArithmeticExpression {
 
         @Override
         public float evaluate() {
@@ -149,7 +150,7 @@ public class MathExpression {
         }
     }
 
-    public record Exp(MolangExpression input) implements MolangExpression {
+    public record Exp(MolangExpression input) implements MolangExpression, ArithmeticExpression {
 
         @Override
         public float evaluate() {
@@ -162,7 +163,7 @@ public class MathExpression {
         }
     }
 
-    public record Floor(MolangExpression input) implements MolangExpression {
+    public record Floor(MolangExpression input) implements MolangExpression, ArithmeticExpression {
 
         @Override
         public float evaluate() {
@@ -175,7 +176,7 @@ public class MathExpression {
         }
     }
 
-    public record HermiteBlend(MolangExpression input) implements MolangExpression {
+    public record HermiteBlend(MolangExpression input) implements MolangExpression, ArithmeticExpression {
 
         @Override
         public float evaluate() {
@@ -189,7 +190,7 @@ public class MathExpression {
         }
     }
 
-    public record Lerp(MolangExpression input, MolangExpression end, MolangExpression zeroToOne) implements MolangExpression {
+    public record Lerp(MolangExpression input, MolangExpression end, MolangExpression zeroToOne) implements MolangExpression, ArithmeticExpression {
 
         @Override
         public float evaluate() {
@@ -204,7 +205,7 @@ public class MathExpression {
         }
     }
 
-    public record Min(MolangExpression a, MolangExpression b) implements MolangExpression {
+    public record Min(MolangExpression a, MolangExpression b) implements MolangExpression, ArithmeticExpression {
 
         @Override
         public float evaluate() {
@@ -217,7 +218,7 @@ public class MathExpression {
         }
     }
 
-    public record Max(MolangExpression a, MolangExpression b) implements MolangExpression {
+    public record Max(MolangExpression a, MolangExpression b) implements MolangExpression, ArithmeticExpression {
 
         @Override
         public float evaluate() {
@@ -230,7 +231,7 @@ public class MathExpression {
         }
     }
 
-    public record MinAngle(MolangExpression input) implements MolangExpression {
+    public record MinAngle(MolangExpression input) implements MolangExpression, ArithmeticExpression {
 
         @Override
         public float evaluate() {
@@ -244,7 +245,7 @@ public class MathExpression {
         }
     }
 
-    public record Mod(MolangExpression value, MolangExpression denominator) implements MolangExpression {
+    public record Mod(MolangExpression value, MolangExpression denominator) implements MolangExpression, ArithmeticExpression {
 
         @Override
         public float evaluate() {
@@ -257,7 +258,7 @@ public class MathExpression {
         }
     }
 
-    public record Pi() implements MolangExpression {
+    public record Pi() implements MolangExpression, ArithmeticExpression {
 
         @Override
         public float evaluate() {
@@ -270,7 +271,7 @@ public class MathExpression {
         }
     }
 
-    public record Pow(MolangExpression base, MolangExpression exponent) implements MolangExpression {
+    public record Pow(MolangExpression base, MolangExpression exponent) implements MolangExpression, ArithmeticExpression {
 
         @Override
         public float evaluate() {
@@ -283,7 +284,7 @@ public class MathExpression {
         }
     }
 
-    public record Random(MolangExpression low, MolangExpression high) implements MolangExpression {
+    public record Random(MolangExpression low, MolangExpression high) implements MolangExpression, ArithmeticExpression {
 
         @Override
         public float evaluate() {
@@ -298,7 +299,7 @@ public class MathExpression {
         }
     }
 
-    public record RandomInteger(MolangExpression low, MolangExpression high) implements MolangExpression {
+    public record RandomInteger(MolangExpression low, MolangExpression high) implements MolangExpression, ArithmeticExpression {
 
         @Override
         public float evaluate() {
@@ -313,7 +314,7 @@ public class MathExpression {
         }
     }
 
-    public record Sin(MolangExpression input) implements MolangExpression {
+    public record Sin(MolangExpression input) implements MolangExpression, ArithmeticExpression {
 
         @Override
         public float evaluate() {
@@ -326,7 +327,7 @@ public class MathExpression {
         }
     }
 
-    public record Sqrt(MolangExpression input) implements MolangExpression {
+    public record Sqrt(MolangExpression input) implements MolangExpression, ArithmeticExpression {
 
         @Override
         public float evaluate() {
@@ -339,7 +340,7 @@ public class MathExpression {
         }
     }
 
-    public record Trunc(MolangExpression input) implements MolangExpression {
+    public record Trunc(MolangExpression input) implements MolangExpression, ArithmeticExpression {
 
         @Override
         public float evaluate() {
@@ -352,7 +353,7 @@ public class MathExpression {
         }
     }
 
-    public record Ln(MolangExpression input) implements MolangExpression {
+    public record Ln(MolangExpression input) implements MolangExpression, ArithmeticExpression {
 
         @Override
         public float evaluate() {
@@ -365,7 +366,7 @@ public class MathExpression {
         }
     }
 
-    public record Round(MolangExpression input) implements MolangExpression {
+    public record Round(MolangExpression input) implements MolangExpression, ArithmeticExpression {
 
         @Override
         public float evaluate() {
