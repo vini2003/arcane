@@ -229,6 +229,28 @@ public final class CompilerContext {
         state(ir).local = local;
     }
 
+    private boolean evaluateComparison(float left, float right, int jumpOpcode) {
+        boolean leftNaN = Float.isNaN(left);
+        boolean rightNaN = Float.isNaN(right);
+        if (jumpOpcode == Opcodes.IFNE) {
+            if (leftNaN || rightNaN) {
+                return true;
+            }
+        } else if (leftNaN || rightNaN) {
+            return false;
+        }
+
+        return switch (jumpOpcode) {
+            case Opcodes.IFLT -> left < right;
+            case Opcodes.IFLE -> left <= right;
+            case Opcodes.IFGT -> left > right;
+            case Opcodes.IFGE -> left >= right;
+            case Opcodes.IFEQ -> left == right;
+            case Opcodes.IFNE -> left != right;
+            default -> false;
+        };
+    }
+
     private ConstantIR constant(float value) {
         ConstantIR node = new ConstantIR(value);
         registerNode(node);
@@ -271,8 +293,8 @@ public final class CompilerContext {
         return node;
     }
 
-    private CachedTrigIR cachedTrig(IR input, String funcName, int cacheIndex) {
-        CachedTrigIR node = new CachedTrigIR(input, funcName, cacheIndex);
+    private CachedTrigIR cachedTrig(IR input, String funcName, int cacheIndex, boolean convertToRadians) {
+        CachedTrigIR node = new CachedTrigIR(input, funcName, cacheIndex, convertToRadians);
         registerNode(node, input);
         return node;
     }
@@ -372,7 +394,7 @@ public final class CompilerContext {
                 float result = switch (unary.operator()) {
                     case MINUS -> -c.value();
                     case PLUS -> c.value();
-                    case BANG -> (c.value() == 0.0f || c.value() == 1.0f) ? (c.value() == 0.0f ? 1.0f : 0.0f) : Float.NaN;
+                    case BANG -> c.value() == 0.0f ? 1.0f : 0.0f;
                     default -> Float.NaN;
                 };
                 if (!Float.isNaN(result)) {
@@ -401,16 +423,7 @@ public final class CompilerContext {
             IR right = constantFold(comparison.right());
 
             if (left instanceof ConstantIR lc && right instanceof ConstantIR rc) {
-                int cmp = Float.compare(lc.value(), rc.value());
-                boolean result = switch (comparison.jumpOpcode()) {
-                    case Opcodes.IFLT -> cmp < 0;
-                    case Opcodes.IFGT -> cmp > 0;
-                    case Opcodes.IFLE -> cmp <= 0;
-                    case Opcodes.IFGE -> cmp >= 0;
-                    case Opcodes.IFEQ -> cmp == 0;
-                    case Opcodes.IFNE -> cmp != 0;
-                    default -> false;
-                };
+                boolean result = evaluateComparison(lc.value(), rc.value(), comparison.jumpOpcode());
                 return constant(result ? 1.0f : 0.0f);
             }
 
@@ -453,13 +466,13 @@ public final class CompilerContext {
             IR input = constantFold(cachedTrig.input());
 
             if (input instanceof ConstantIR c) {
-                double radians = Math.toRadians(c.value());
+                double argument = cachedTrig.convertInputToRadians() ? Math.toRadians(c.value()) : c.value();
                 float result = (float) switch (cachedTrig.funcName()) {
-                    case "sin" -> Math.sin(radians);
-                    case "cos" -> Math.cos(radians);
-                    case "asin" -> Math.asin(radians);
-                    case "acos" -> Math.acos(radians);
-                    case "atan" -> Math.atan(radians);
+                    case "sin" -> Math.sin(argument);
+                    case "cos" -> Math.cos(argument);
+                    case "asin" -> Math.asin(argument);
+                    case "acos" -> Math.acos(argument);
+                    case "atan" -> Math.atan(argument);
                     default -> Double.NaN;
                 };
                 if (!Float.isNaN(result)) {
@@ -468,7 +481,7 @@ public final class CompilerContext {
             }
 
             if (input != cachedTrig.input()) {
-                return cachedTrig(input, cachedTrig.funcName(), cachedTrig.cacheIndex());
+                return cachedTrig(input, cachedTrig.funcName(), cachedTrig.cacheIndex(), cachedTrig.convertInputToRadians());
             }
         }
 
@@ -550,7 +563,7 @@ public final class CompilerContext {
         } else if (ir instanceof MathIR mathFunc) {
             return math(algebraicSimplify(mathFunc.input()), mathFunc.funcName(), mathFunc.needsRadians());
         } else if (ir instanceof CachedTrigIR cachedTrig) {
-            return cachedTrig(algebraicSimplify(cachedTrig.input()), cachedTrig.funcName(), cachedTrig.cacheIndex());
+            return cachedTrig(algebraicSimplify(cachedTrig.input()), cachedTrig.funcName(), cachedTrig.cacheIndex(), cachedTrig.convertInputToRadians());
         } else if (ir instanceof ComplexMathIR complexMath) {
             List<IR> simplified = new ArrayList<>();
             for (IR op : complexMath.operands()) {
@@ -581,9 +594,9 @@ public final class CompilerContext {
                 case "round" -> Math.round(value);
                 case "sin" -> Math.sin(needsRadians ? Math.toRadians(value) : value);
                 case "cos" -> Math.cos(needsRadians ? Math.toRadians(value) : value);
-                case "asin" -> Math.asin(needsRadians ? Math.toRadians(value) : value);
-                case "acos" -> Math.acos(needsRadians ? Math.toRadians(value) : value);
-                case "atan" -> Math.atan(needsRadians ? Math.toRadians(value) : value);
+                case "asin" -> Math.asin(value);
+                case "acos" -> Math.acos(value);
+                case "atan" -> Math.atan(value);
                 default -> Float.NaN;
             };
         } catch (Exception e) {
@@ -671,6 +684,8 @@ public final class CompilerContext {
             case GREATER_THAN -> comparison(left, right, Opcodes.IFGT);
             case LESS_THAN_OR_EQUAL -> comparison(left, right, Opcodes.IFLE);
             case GREATER_THAN_OR_EQUAL -> comparison(left, right, Opcodes.IFGE);
+            case DOUBLE_EQUAL -> comparison(left, right, Opcodes.IFEQ);
+            case BANG_EQUAL -> comparison(left, right, Opcodes.IFNE);
             case DOUBLE_AMPERSAND -> buildLogicalAnd(left, right);
             case DOUBLE_PIPE -> buildLogicalOr(left, right);
             default -> {
@@ -682,8 +697,8 @@ public final class CompilerContext {
     }
 
     public IR buildLogicalAnd(IR left, IR right) {
-        IR leftCmp = comparison(left, constant(0.0f), Opcodes.IFGT);
-        IR rightCmp = comparison(right, constant(0.0f), Opcodes.IFGT);
+        IR leftCmp = comparison(left, constant(0.0f), Opcodes.IFNE);
+        IR rightCmp = comparison(right, constant(0.0f), Opcodes.IFNE);
         return ternary(leftCmp, rightCmp, constant(0.0f));
     }
 
@@ -759,17 +774,22 @@ public final class CompilerContext {
         }
     }
 
+    private boolean trigInputUsesDegrees(String funcName) {
+        return "sin".equals(funcName) || "cos".equals(funcName);
+    }
+
     public IR buildCachedTrigIR(IR input, String funcName) {
+        boolean convertToRadians = trigInputUsesDegrees(funcName);
         if (input instanceof AccessorIR accessorIR) {
             Integer cacheIndex = accessorTrigCacheMap.get(accessorIR.accessorIndex());
             if (cacheIndex == null) {
                 cacheIndex = nextTrigCacheIndex++;
                 accessorTrigCacheMap.put(accessorIR.accessorIndex(), cacheIndex);
             }
-            return cachedTrig(input, funcName, cacheIndex);
+            return cachedTrig(input, funcName, cacheIndex, convertToRadians);
         }
 
-        return math(input, funcName, true);
+        return math(input, funcName, convertToRadians);
     }
 
     public void assignLocals(IR ir) {

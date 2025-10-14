@@ -16,8 +16,8 @@ import org.objectweb.asm.Opcodes;
  * <ul>
  *   <li>{@code +x}: pass-through; emits the operand unchanged.</li>
  *   <li>{@code -x}: {@code FNEG} over the operand.</li>
- *   <li>{@code !x}: stores the operand to a local, compares against {@code 0.0f} and {@code 1.0f} via
- *       {@code FCMPL} + conditional jumps, and pushes {@code 1.0f} or {@code 0.0f} accordingly.</li>
+ *   <li>{@code !x}: stores the operand to a local, compares against {@code 0.0f}, and pushes {@code 1.0f}
+ *       when the value is zero (including -0.0f) or {@code 0.0f} otherwise.</li>
  * </ul>
  *
  * <p><b>Registration & layout</b>: delegates to the operand; no accessor/capture state.</p>
@@ -51,7 +51,7 @@ import org.objectweb.asm.Opcodes;
  *   Lend:
  * </pre>
  *
- * @implNote Uses {@code FCMPL} to get well-defined NaN branch behavior consistent with JVM semantics.
+ * @implNote Uses {@code FCMPL} so NaN is treated as “truthy” (result 0) matching zero-vs-non-zero semantics.
  * @see CompilerContext#constantFold(IR)
  * @see CompilerContext#algebraicSimplify(IR)
  */
@@ -68,23 +68,18 @@ public record UnaryOpIR(IR operand, MolangTokenType operator) implements IR {
             int valueLocal = ctx.allocateLocal();
             mv.visitVarInsn(Opcodes.FSTORE, valueLocal);
 
-            Label checkOne = new Label();
+            Label nonZero = new Label();
             Label end = new Label();
 
             mv.visitVarInsn(Opcodes.FLOAD, valueLocal);
             IR.pushFloat(mv, 0.0f);
             mv.visitInsn(Opcodes.FCMPL);
-            mv.visitJumpInsn(Opcodes.IFNE, checkOne);
+            mv.visitJumpInsn(Opcodes.IFNE, nonZero);
 
             IR.pushFloat(mv, 1.0f);
             mv.visitJumpInsn(Opcodes.GOTO, end);
 
-            mv.visitLabel(checkOne);
-            mv.visitVarInsn(Opcodes.FLOAD, valueLocal);
-            IR.pushFloat(mv, 1.0f);
-            mv.visitInsn(Opcodes.FCMPL);
-            mv.visitJumpInsn(Opcodes.IFNE, end);
-
+            mv.visitLabel(nonZero);
             IR.pushFloat(mv, 0.0f);
 
             mv.visitLabel(end);

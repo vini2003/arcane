@@ -6,7 +6,7 @@ import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 
 /**
- * IR node for trigonometric functions with per-input caching (sin, cos, asin, acos, atan) in degrees.
+ * IR node for trigonometric functions with per-input caching.
  *
  * <p><b>Purpose</b>: avoid recomputation of expensive trig on identical inputs within the same
  * {@code evaluate()} call. The cache is addressed by a stable {@code cacheIndex} keyed from the driving
@@ -25,7 +25,8 @@ import org.objectweb.asm.Opcodes;
  *   <li>On first encounter:
  *     <ul>
  *       <li>Emit input, store as the cached input local.</li>
- *       <li>Compute degrees->radians, call {@code Math.func(D)D}, {@code D2F}, {@code DUP} to store as cached output local.</li>
+ *       <li>Compute the trig function (optionally converting degrees-&gt;radians), {@code DUP} the float result, and
+ *           store it as the cached output.</li>
  *     </ul>
  *   </li>
  * </ul>
@@ -61,23 +62,22 @@ import org.objectweb.asm.Opcodes;
  *   Lcompute:
  *   FLOAD newIn
  *   F2D
- *   LDC 0.017453292519943295
- *   DMUL
+ *   [optional] LDC radians-per-degree; DMUL
  *   INVOKESTATIC Math.&lt;func&gt; (D)D
  *   D2F
+ *   DUP
  *   FSTORE out_cache
  *   FLOAD newIn
  *   FSTORE in_cache
- *   FLOAD out_cache
  *   Lend:
  * </pre>
  *
- * @implNote Degrees are converted via a baked constant to avoid method calls for {@code toRadians}.
- * @see CompilerContext#buildCachedTrigIR(IR, String)
- * @see CompilerContext#trigInputLocals
- * @see CompilerContext#trigOutputLocals
+ * @implNote {@code convertInputToRadians} is true for {@code sin}/{@code cos}; other trig variants operate on
+ * unitless ratios and skip the conversion.
  */
-public record CachedTrigIR(IR input, String funcName, int cacheIndex) implements IR {
+public record CachedTrigIR(IR input, String funcName, int cacheIndex, boolean convertInputToRadians) implements IR {
+    private static final double DEGREES_TO_RADIANS = Math.PI / 180.0;
+
     @Override
     public void emit(MethodVisitor mv, CompilerContext ctx) {
         Integer cachedInputLocal = ctx.trigInputLocals.get(cacheIndex);
@@ -100,18 +100,10 @@ public record CachedTrigIR(IR input, String funcName, int cacheIndex) implements
             mv.visitJumpInsn(Opcodes.GOTO, endLabel);
 
             mv.visitLabel(computeLabel);
-            mv.visitVarInsn(Opcodes.FLOAD, newInputLocal);
-            mv.visitInsn(Opcodes.F2D);
-            mv.visitLdcInsn(0.017453292519943295);
-            mv.visitInsn(Opcodes.DMUL);
-            mv.visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/Math", funcName, "(D)D", false);
-            mv.visitInsn(Opcodes.D2F);
-            mv.visitVarInsn(Opcodes.FSTORE, cachedOutputLocal);
+            emitInvocation(mv, newInputLocal, cachedOutputLocal);
 
             mv.visitVarInsn(Opcodes.FLOAD, newInputLocal);
             mv.visitVarInsn(Opcodes.FSTORE, cachedInputLocal);
-
-            mv.visitVarInsn(Opcodes.FLOAD, cachedOutputLocal);
 
             mv.visitLabel(endLabel);
 
@@ -121,12 +113,7 @@ public record CachedTrigIR(IR input, String funcName, int cacheIndex) implements
             int inputLocal = ctx.allocateLocal();
             mv.visitVarInsn(Opcodes.FSTORE, inputLocal);
 
-            mv.visitVarInsn(Opcodes.FLOAD, inputLocal);
-            mv.visitInsn(Opcodes.F2D);
-            mv.visitLdcInsn(0.017453292519943295);
-            mv.visitInsn(Opcodes.DMUL);
-            mv.visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/Math", funcName, "(D)D", false);
-            mv.visitInsn(Opcodes.D2F);
+            emitInvocation(mv, inputLocal, null);
 
             int outputLocal = ctx.allocateLocal();
             mv.visitInsn(Opcodes.DUP);
@@ -134,6 +121,21 @@ public record CachedTrigIR(IR input, String funcName, int cacheIndex) implements
 
             ctx.trigInputLocals.put(cacheIndex, inputLocal);
             ctx.trigOutputLocals.put(cacheIndex, outputLocal);
+        }
+    }
+
+    private void emitInvocation(MethodVisitor mv, int inputLocal, Integer cachedOutputLocal) {
+        mv.visitVarInsn(Opcodes.FLOAD, inputLocal);
+        mv.visitInsn(Opcodes.F2D);
+        if (convertInputToRadians) {
+            mv.visitLdcInsn(DEGREES_TO_RADIANS);
+            mv.visitInsn(Opcodes.DMUL);
+        }
+        mv.visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/Math", funcName, "(D)D", false);
+        mv.visitInsn(Opcodes.D2F);
+        if (cachedOutputLocal != null) {
+            mv.visitInsn(Opcodes.DUP);
+            mv.visitVarInsn(Opcodes.FSTORE, cachedOutputLocal);
         }
     }
 
