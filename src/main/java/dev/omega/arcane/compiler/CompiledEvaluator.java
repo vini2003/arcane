@@ -5,6 +5,5 @@ package dev.omega.arcane.compiler;
  */
 @FunctionalInterface
 public interface CompiledEvaluator {
-
     float evaluate();
 }

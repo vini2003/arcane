@@ -14,7 +14,7 @@ import org.objectweb.asm.MethodVisitor;
  * <ul>
  *   <li>Emits the literal using {@code FCONST_0/1/2} where applicable; otherwise loads via {@code LDC}.</li>
  *   <li>No locals are allocated by this node directly; caching is handled by the surrounding
- *       {@link CompilerContext#emitIR(IR, org.objectweb.asm.MethodVisitor)}
+ *       {@link CompilerContext#emitIR(IR, MethodVisitor)}
  *       when reference counts warrant it.</li>
  * </ul>
  *
@@ -38,13 +38,7 @@ import org.objectweb.asm.MethodVisitor;
  * @see CompilerContext#constantFold(IR)
  * @see CompilerContext#algebraicSimplify(IR)
  */
-public final class ConstantIR extends IR {
-    public final float value;
-
-    public ConstantIR(float value) {
-        this.value = value;
-    }
-
+public record ConstantIR(float value) implements IR {
     @Override
     public void emit(MethodVisitor mv, CompilerContext ctx) {
         IR.pushFloat(mv, value);

@@ -10,14 +10,9 @@ public record CompiledExpression(MolangExpression source, CompiledEvaluator eval
     }
 
     @Override
-    public MolangExpression simplify() {
-        return this;
-    }
-
-    @Override
     public MolangExpression bind(ExpressionBindingContext context, Object... values) {
         // When binding, we must update the source expression; not this one.
-        var bound = source.bind(context, values);
+        MolangExpression bound = source.bind(context, values);
 
         if (bound == source) {
             return this;

@@ -54,18 +54,7 @@ import org.objectweb.asm.Opcodes;
  * @implNote Choice of {@code F2D/D2F} preserves precision typical of JVM Math while returning float.
  * @see CompilerContext#computeMathFunc(String, float, boolean)
  */
-public final class MathIR extends IR {
-    public final IR input;
-    public final String funcName;
-    public final boolean needsRadians;
-
-    public MathIR(IR input, String funcName, boolean needsRadians) {
-        this.input = input;
-        this.funcName = funcName;
-        this.needsRadians = needsRadians;
-        input.refCount++;
-    }
-
+public record MathIR(IR input, String funcName, boolean needsRadians) implements IR {
     @Override
     public void emit(MethodVisitor mv, CompilerContext ctx) {
         ctx.emitIR(input, mv);

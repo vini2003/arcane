@@ -11,7 +11,6 @@ import java.util.logging.Level;
  * Highly optimized JIT compiler for Molang expressions.
  */
 public final class Compiler {
-
     public static final AtomicInteger CLASS_COUNTER = new AtomicInteger();
 
     public static final String MOLANG_EXPRESSION_INTERNAL = "dev/omega/arcane/ast/MolangExpression";
@@ -39,8 +38,8 @@ public final class Compiler {
 
         try {
             // Evaluate and compile the expression.
-            var context = new CompilerContext(expression);
-            var evaluator = context.compile();
+            CompilerContext context = new CompilerContext(expression);
+            CompiledEvaluator evaluator = context.compile();
 
             // "evaluator" is the compiled/generated class. If compilation failed,
             // we return the expression itself to avoid stalling the pipeline.

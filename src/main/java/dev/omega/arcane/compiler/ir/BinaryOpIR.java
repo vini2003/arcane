@@ -13,9 +13,9 @@ import org.objectweb.asm.MethodVisitor;
  * <ul>
  *   <li>Emit {@code left}, then {@code right}, then the selected opcode
  *       ({@code FADD, FSUB, FMUL, FDIV, FREM}).</li>
- *   <li>Local caching of subtrees (when beneficial) is orchestrated by
- *       {@link CompilerContext#emitIR(IR, org.objectweb.asm.MethodVisitor)} based on
- *       {@link IR#refCount} and assigned {@link IR#local}.</li>
+ *   <li>Local caching of subtrees is orchestrated by
+ *       {@link CompilerContext#emitIR(IR, MethodVisitor)} using metadata
+ *       managed by the {@link CompilerContext}.</li>
  * </ul>
  *
  * <p><b>Registration & layout</b>: delegates to child nodes; no accessor/capture state.</p>
@@ -43,19 +43,7 @@ import org.objectweb.asm.MethodVisitor;
  * @see CompilerContext#constantFold(IR)
  * @see CompilerContext#algebraicSimplify(IR)
  */
-public final class BinaryOpIR extends IR {
-    public final IR left;
-    public final IR right;
-    public final int opcode;
-
-    public BinaryOpIR(IR left, IR right, int opcode) {
-        this.left = left;
-        this.right = right;
-        this.opcode = opcode;
-        left.refCount++;
-        right.refCount++;
-    }
-
+public record BinaryOpIR(IR left, IR right, int opcode) implements IR {
     @Override
     public void emit(MethodVisitor mv, CompilerContext ctx) {
         ctx.emitIR(left, mv);

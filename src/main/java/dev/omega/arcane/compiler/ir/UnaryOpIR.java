@@ -55,21 +55,12 @@ import org.objectweb.asm.Opcodes;
  * @see CompilerContext#constantFold(IR)
  * @see CompilerContext#algebraicSimplify(IR)
  */
-public final class UnaryOpIR extends IR {
-    public final IR operand;
-    public final MolangTokenType operator;
-
-    public UnaryOpIR(IR operand, MolangTokenType operator) {
-        this.operand = operand;
-        this.operator = operator;
-        operand.refCount++;
-    }
-
+public record UnaryOpIR(IR operand, MolangTokenType operator) implements IR {
     @Override
     public void emit(MethodVisitor mv, CompilerContext ctx) {
         ctx.emitIR(operand, mv);
 
-        if (operator == dev.omega.arcane.lexer.MolangTokenType.MINUS) {
+        if (operator == MolangTokenType.MINUS) {
             mv.visitInsn(Opcodes.FNEG);
         } else if (operator == MolangTokenType.PLUS) {
             // No-op

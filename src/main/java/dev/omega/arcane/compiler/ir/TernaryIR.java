@@ -43,20 +43,7 @@ import org.objectweb.asm.Opcodes;
  * @implNote Only the selected arm is evaluated at runtime, preserving short-circuit behavior.
  * @see CompilerContext#constantFold(IR)
  */
-public final class TernaryIR extends IR {
-    public final IR condition;
-    public final IR trueValue;
-    public final IR falseValue;
-
-    public TernaryIR(IR condition, IR trueValue, IR falseValue) {
-        this.condition = condition;
-        this.trueValue = trueValue;
-        this.falseValue = falseValue;
-        condition.refCount++;
-        trueValue.refCount++;
-        falseValue.refCount++;
-    }
-
+public record TernaryIR(IR condition, IR trueValue, IR falseValue) implements IR {
     @Override
     public void emit(MethodVisitor mv, CompilerContext ctx) {
         ctx.emitIR(condition, mv);

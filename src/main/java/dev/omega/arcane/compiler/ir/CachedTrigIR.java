@@ -25,7 +25,7 @@ import org.objectweb.asm.Opcodes;
  *   <li>On first encounter:
  *     <ul>
  *       <li>Emit input, store as the cached input local.</li>
- *       <li>Compute degrees→radians, call {@code Math.func(D)D}, {@code D2F}, {@code DUP} to store as cached output local.</li>
+ *       <li>Compute degrees->radians, call {@code Math.func(D)D}, {@code D2F}, {@code DUP} to store as cached output local.</li>
  *     </ul>
  *   </li>
  * </ul>
@@ -77,18 +77,7 @@ import org.objectweb.asm.Opcodes;
  * @see CompilerContext#trigInputLocals
  * @see CompilerContext#trigOutputLocals
  */
-public final class CachedTrigIR extends IR {
-    public final IR input;
-    public final String funcName;
-    public final int cacheIndex;
-
-    public CachedTrigIR(IR input, String funcName, int cacheIndex) {
-        this.input = input;
-        this.funcName = funcName;
-        this.cacheIndex = cacheIndex;
-        input.refCount++;
-    }
-
+public record CachedTrigIR(IR input, String funcName, int cacheIndex) implements IR {
     @Override
     public void emit(MethodVisitor mv, CompilerContext ctx) {
         Integer cachedInputLocal = ctx.trigInputLocals.get(cacheIndex);

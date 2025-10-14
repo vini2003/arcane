@@ -43,19 +43,7 @@ import org.objectweb.asm.Opcodes;
  * @implNote {@code FCMPL} orders NaN as less; the chosen opcode defines final semantics.
  * @see CompilerContext#constantFold(IR)
  */
-public final class ComparisonIR extends IR {
-    public final IR left;
-    public final IR right;
-    public final int jumpOpcode;
-
-    public ComparisonIR(IR left, IR right, int jumpOpcode) {
-        this.left = left;
-        this.right = right;
-        this.jumpOpcode = jumpOpcode;
-        left.refCount++;
-        right.refCount++;
-    }
-
+public record ComparisonIR(IR left, IR right, int jumpOpcode) implements IR {
     @Override
     public void emit(MethodVisitor mv, CompilerContext ctx) {
         ctx.emitIR(left, mv);

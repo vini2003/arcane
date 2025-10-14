@@ -7,7 +7,7 @@ import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 
 /**
- * IR node that reads a bound {@link dev.omega.arcane.reference.FloatAccessor} from its target object.
+ * IR node that reads a bound {@link FloatAccessor} from its target object.
  *
  * <p><b>Purpose</b>: models {@code accessor.apply(target)} as part of the expression graph and emits bytecode
  * that retrieves the floating-point value efficiently, with two key optimizations:</p>
@@ -17,7 +17,7 @@ import org.objectweb.asm.Opcodes;
  *       {@link CompilerContext#accessorValueLocals}. Any subsequent uses of the same accessor
  *       index are compiled as a simple {@code FLOAD}, avoiding repeated interface dispatch.</li>
  *   <li><b>Field specialization</b>: for each distinct accessor/target pair registered via
- *       {@link CompilerContext#registerAccessor(dev.omega.arcane.reference.FloatAccessor, Object)},
+ *       {@link CompilerContext#registerAccessor(FloatAccessor, Object)},
  *       the compiler records an {@code AccessorInfo}. When the accessor is specialized, the generated class owns
  *       private final fields {@code accessor$<index>} and {@code target$<index>}. Emission then loads from these
  *       fields instead of indexing shared arrays, reducing array traffic and enabling a precise {@code CHECKCAST}
@@ -41,7 +41,7 @@ import org.objectweb.asm.Opcodes;
  * <p><b>Registration & layout</b>:</p>
  * <ul>
  *   <li>{@link #collectAccessors(CompilerContext)} calls
- *       {@link CompilerContext#registerAccessor(dev.omega.arcane.reference.FloatAccessor, Object)}, which:
+ *       {@link CompilerContext#registerAccessor(FloatAccessor, Object)}, which:
  *       <ul>
  *         <li>Assigns a stable {@code accessorIndex} for de-duplication.</li>
  *         <li>Appends entries to the per-class arrays/fields; constructor emission wires
@@ -82,21 +82,11 @@ import org.objectweb.asm.Opcodes;
  * @implNote This node does not perform null checks; it assumes the constructor populated accessors/targets or
  * specialized fields correctly. If an accessor throws, the exception propagates to the caller.
  * @see CompilerContext#accessorValueLocals
- * @see CompilerContext#registerAccessor(dev.omega.arcane.reference.FloatAccessor, Object)
+ * @see CompilerContext#registerAccessor(FloatAccessor, Object)
  * @see CachedTrigIR
  */
 
-public final class AccessorIR extends IR {
-    public final FloatAccessor<?> accessor;
-    public final Object target;
-    public final int accessorIndex;
-
-    public AccessorIR(FloatAccessor<?> accessor, Object target, int accessorIndex) {
-        this.accessor = accessor;
-        this.target = target;
-        this.accessorIndex = accessorIndex;
-    }
-
+public record AccessorIR(FloatAccessor<?> accessor, Object target, int accessorIndex) implements IR {
     @Override
     public void emit(MethodVisitor mv, CompilerContext ctx) {
         Integer cachedLocal = ctx.accessorValueLocals.get(accessorIndex);
@@ -109,7 +99,7 @@ public final class AccessorIR extends IR {
         if (info != null && info.isSpecialized) {
             mv.visitVarInsn(Opcodes.ALOAD, 0);
             mv.visitFieldInsn(Opcodes.GETFIELD, ctx.internalName, "accessor$" + accessorIndex,
-                    "L" + dev.omega.arcane.compiler.Compiler.FLOAT_ACCESSOR_INTERNAL + ";");
+                    "L" + Compiler.FLOAT_ACCESSOR_INTERNAL + ";");
 
             mv.visitVarInsn(Opcodes.ALOAD, 0);
             mv.visitFieldInsn(Opcodes.GETFIELD, ctx.internalName, "target$" + accessorIndex,
@@ -119,11 +109,11 @@ public final class AccessorIR extends IR {
                 mv.visitTypeInsn(Opcodes.CHECKCAST, info.targetClass);
             }
 
-            mv.visitMethodInsn(Opcodes.INVOKEINTERFACE, dev.omega.arcane.compiler.Compiler.FLOAT_ACCESSOR_INTERNAL, "apply",
+            mv.visitMethodInsn(Opcodes.INVOKEINTERFACE, Compiler.FLOAT_ACCESSOR_INTERNAL, "apply",
                     "(Ljava/lang/Object;)F", true);
         } else {
             mv.visitVarInsn(Opcodes.ALOAD, 0);
-            mv.visitFieldInsn(Opcodes.GETFIELD, ctx.internalName, "accessors", "[L" + dev.omega.arcane.compiler.Compiler.FLOAT_ACCESSOR_INTERNAL + ";");
+            mv.visitFieldInsn(Opcodes.GETFIELD, ctx.internalName, "accessors", "[L" + Compiler.FLOAT_ACCESSOR_INTERNAL + ";");
             IR.pushInt(mv, accessorIndex);
             mv.visitInsn(Opcodes.AALOAD);
 

@@ -7,7 +7,7 @@ import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 
 /**
- * IR node that defers evaluation to a captured, non-compiled {@link dev.omega.arcane.ast.MolangExpression}.
+ * IR node that defers evaluation to a captured, non-compiled {@link MolangExpression}.
  *
  * <p><b>Purpose</b>: provide a safe escape hatch when an AST construct is not (or not yet) supported by the
  * JIT pipeline. The original expression is preserved in a {@code captured[]} array and invoked directly.</p>
@@ -27,7 +27,8 @@ import org.objectweb.asm.Opcodes;
  * <p><b>Interaction with other optimizations</b>:</p>
  * <ul>
  *   <li>By design, this node is opaque to constant folding and algebraic simplification.</li>
- *   <li>Outer local caching may still memoize its result if the node is shared (via {@link IR#local}).</li>
+ *   <li>Outer local caching may still memoize its result when the node is shared; the
+ *       {@link CompilerContext} tracks that metadata.</li>
  * </ul>
  *
  * <p><b>Threading & safety</b>: behavior is that of the delegated expression; this node adds no shared state.</p>
@@ -44,19 +45,11 @@ import org.objectweb.asm.Opcodes;
  * @implNote Prefer extending the IR set over relying on this node in hot paths; it forfeits JIT inlining benefits.
  * @see CompilerContext#captured
  */
-public final class FallbackIR extends IR {
-    public final MolangExpression expression;
-    public final int captureIndex;
-
-    public FallbackIR(MolangExpression expression, int captureIndex) {
-        this.expression = expression;
-        this.captureIndex = captureIndex;
-    }
-
+public record FallbackIR(MolangExpression expression, int captureIndex) implements IR {
     @Override
     public void emit(MethodVisitor mv, CompilerContext ctx) {
         mv.visitVarInsn(Opcodes.ALOAD, 0);
-        mv.visitFieldInsn(Opcodes.GETFIELD, ctx.internalName, "captured", "[" + dev.omega.arcane.compiler.Compiler.MOLANG_EXPRESSION_DESC);
+        mv.visitFieldInsn(Opcodes.GETFIELD, ctx.internalName, "captured", "[" + Compiler.MOLANG_EXPRESSION_DESC);
         IR.pushInt(mv, captureIndex);
         mv.visitInsn(Opcodes.AALOAD);
         mv.visitMethodInsn(Opcodes.INVOKEINTERFACE, Compiler.MOLANG_EXPRESSION_INTERNAL, "evaluate", "()F", true);

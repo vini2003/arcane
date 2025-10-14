@@ -17,10 +17,10 @@ import java.util.List;
  * <ul>
  *   <li><b>min/max</b>: emit two operands; {@code INVOKESTATIC Math.min/max (FF)F}.</li>
  *   <li><b>pow</b>: {@code F2D} both operands; {@code Math.pow(DD)D}; {@code D2F}.</li>
- *   <li><b>atan2</b>: convert both inputs from degrees→radians in double precision; call {@code Math.atan2(DD)D}; {@code D2F}.</li>
+ *   <li><b>atan2</b>: convert both inputs from degreesÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢radians in double precision; call {@code Math.atan2(DD)D}; {@code D2F}.</li>
  *   <li><b>clamp</b>: compute {@code max(min, min(value, max))} using {@code Math.max/min(FF)F} with locals.</li>
  *   <li><b>lerp</b>: {@code a + (b - a) * t} with three float locals to minimize stack traffic.</li>
- *   <li><b>hermiteBlend</b>: inlined {@code 3t^2 - 2t^3} using two temporaries (t², t³).</li>
+ *   <li><b>hermiteBlend</b>: inlined {@code 3t^2 - 2t^3} using two temporaries (tÃƒâ€šÃ‚Â², tÃƒâ€šÃ‚Â³).</li>
  *   <li><b>minAngle</b>: clamp input to {@code [-180, 180]} in-place via {@code Math.max/min}.</li>
  *   <li><b>random</b>: {@code low + Random.nextFloat() * (high - low)} using {@code Molang.RANDOM}.</li>
  *   <li><b>randomInteger</b>: inclusive-high integer: {@code floor(low + rand*(high+0.999 - low))} then {@code I2F}.</li>
@@ -31,7 +31,7 @@ import java.util.List;
  * <p><b>Interaction with other optimizations</b>:</p>
  * <ul>
  *   <li><b>Constant folding</b>: when all operands are {@code ConstantIR}, the compiler computes the result with
- *       {@link CompilerContext#computeComplexMath(String, java.util.List)}.</li>
+ *       {@link CompilerContext#computeComplexMath(String, List)}.</li>
  *   <li><b>Local caching</b>: high-arity cases (clamp, lerp, hermiteBlend) use temporaries to reduce re-evaluation.</li>
  * </ul>
  *
@@ -61,20 +61,9 @@ import java.util.List;
  * </pre>
  *
  * @implNote {@code atan2} treats inputs as degrees and converts to radians before delegation to {@code Math.atan2}.
- * @see CompilerContext#computeComplexMath(String, java.util.List)
+ * @see CompilerContext#computeComplexMath(String, List)
  */
-public final class ComplexMathIR extends IR {
-    public final List<IR> operands;
-    public final String type;
-
-    public ComplexMathIR(List<IR> operands, String type) {
-        this.operands = operands;
-        this.type = type;
-        for (IR op : operands) {
-            op.refCount++;
-        }
-    }
-
+public record ComplexMathIR(List<IR> operands, String type) implements IR {
     @Override
     public void emit(MethodVisitor mv, CompilerContext ctx) {
         switch (type) {

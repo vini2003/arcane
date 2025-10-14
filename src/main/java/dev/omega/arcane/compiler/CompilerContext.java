@@ -39,6 +39,113 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Stateful builder/optimizer/codegen driver for Molang expression compilation.
+ *
+ * <p><b>Purpose</b>: orchestrates the entire pipeline from AST to executable bytecode:
+ * IR construction, local/metadata management, peephole optimizations, accessor registration,
+ * class emission, and evaluation method generation. A single {@code CompilerContext} instance
+ * is used per compilation episode and is not thread-safe.</p>
+ *
+ * <p><b>High-level pipeline</b>:</p>
+ * <ol>
+ *   <li><b>Build IR</b>: {@link #buildIR(dev.omega.arcane.ast.MolangExpression)} converts the AST to a compact,
+ *       float-only IR graph; nodes are memoized in {@link #irCache} to preserve DAG structure and enable
+ *       reference counting.</li>
+ *   <li><b>Optimize</b>: {@link #optimize(dev.omega.arcane.compiler.ir.IR)} applies
+ *       {@link #constantFold(dev.omega.arcane.compiler.ir.IR)} and
+ *       {@link #algebraicSimplify(dev.omega.arcane.compiler.ir.IR)} to reduce work and shrink codegen.</li>
+ *   <li><b>Collect accessors</b>: each IR node visits {@link #registerAccessor(dev.omega.arcane.reference.FloatAccessor, Object)}
+ *       through {@code collectAccessors}, populating {@link #accessors}, {@link #targets}, and {@link #accessorInfos}
+ *       for constructor wiring and fast paths.</li>
+ *   <li><b>Assign locals</b>: {@link #assignLocals(dev.omega.arcane.compiler.ir.IR)} places per-evaluation memoization
+ *       slots on IR nodes with {@code refCount > 1} (tracked in {@link #nodeStates}).</li>
+ *   <li><b>Emit class</b>: {@link #compile()} drives bytecode generation:
+ *       <ul>
+ *         <li>Defines a unique class name in {@link #internalName} and emits fields for captured expressions,
+ *             accessors/targets, and any specialized per-accessor fields.</li>
+ *         <li>{@link #emitConstructor(org.objectweb.asm.ClassWriter)} wires arrays/fields from constructor args
+ *             and copies specialized pairs to {@code accessor$i/target$i}.</li>
+ *         <li>{@link #emitEvaluate(org.objectweb.asm.ClassWriter, dev.omega.arcane.compiler.ir.IR)} emits the
+ *             evaluator method; {@link #emitIR(dev.omega.arcane.compiler.ir.IR, org.objectweb.asm.MethodVisitor)}
+ *             handles memoization and delegates node-specific bytecode to {@code IR.emit}.</li>
+ *       </ul>
+ *   </li>
+ * </ol>
+ *
+ * <p><b>Key data structures</b>:</p>
+ * <ul>
+ *   <li>{@link #irCache}: AST→IR identity map ensuring each AST node is lowered once and enabling accurate
+ *       reference counts for common-subexpression caching.</li>
+ *   <li>{@link #nodeStates}: per-IR compilation metadata (refCount, assigned local, init flag). Keeps IR nodes
+ *       simple and reusable while centralizing mutability in the context.</li>
+ *   <li>{@link #captured}: non-compiled AST fragments used by {@code FallbackIR}; passed to the generated class.</li>
+ *   <li>{@link #accessors}, {@link #targets}, {@link #accessorInfos}, {@link #accessorIndexMap}:
+ *       stable indexing, constructor wiring, and optional specialization for query accessors.</li>
+ *   <li>{@link #accessorValueLocals}, {@link #trigInputLocals}, {@link #trigOutputLocals}:
+ *       method-local caches enabling one-eval-per-frame behavior for accessors and cached trig.</li>
+ *   <li>{@link #freeLocals}, {@link #nextLocal}: simple linear-scan local allocator for the evaluate method.</li>
+ * </ul>
+ *
+ * <p><b>Evaluation-time memoization</b>:</p>
+ * <ul>
+ *   <li>Nodes with {@code refCount > 1} receive a {@code local} via {@link #assignLocals(IR)}; on first execution,
+ *       {@link #emitIR(IR, MethodVisitor)} stores the computed float and marks it initialized in {@link #nodeStates}.
+ *       Subsequent uses load via {@code FLOAD}.</li>
+ *   <li>Accessor values cache into {@link #accessorValueLocals}. Trig nodes cache both input and output locals
+ *       by stable cache index derived from their driving accessor ({@link #accessorTrigCacheMap}, {@link #nextTrigCacheIndex}).</li>
+ * </ul>
+ *
+ * <p><b>Math folding</b>:</p>
+ * <ul>
+ *   <li>{@link #computeMathFunc(String, float, boolean)} and {@link #computeComplexMath(String, java.util.List)}
+ *       centralize safe constant evaluation for scalar and composite math, returning {@code NaN} to indicate
+ *       “no fold.”</li>
+ * </ul>
+ *
+ * <p><b>Bytecode emission contract</b>:</p>
+ * <ul>
+ *   <li>{@link #emitIR(IR, MethodVisitor)} is the single entry point. It:
+ *     <ol>
+ *       <li>Checks the node’s {@code local} and initialization state in {@link #nodeStates}.</li>
+ *       <li>Delegates to {@code IR.emit} when a recompute is needed.</li>
+ *       <li>Optionally {@code DUP}/{@code FSTORE} to the assigned local on first use.</li>
+ *     </ol>
+ *   </li>
+ *   <li>IR nodes must leave exactly one float on the stack; temporary locals should be obtained via
+ *       {@link #allocateLocal()} and returned with {@link #releaseLocal(int)} when appropriate.</li>
+ * </ul>
+ *
+ * <p><b>Error handling</b>:</p>
+ * <ul>
+ *   <li>{@link #compile()} may return {@code null} if codegen cannot proceed (e.g., reflective construction fails).</li>
+ *   <li>Constant folding guards with try/catch and uses {@code NaN} sentinel to avoid mis-folding on domain errors.</li>
+ * </ul>
+ *
+ * <p><b>Threading & lifetime</b>:</p>
+ * <ul>
+ *   <li>Instances are single-use and not thread-safe. Generated evaluator objects are independent and may be used
+ *       concurrently. All per-evaluation caches are method-local.</li>
+ * </ul>
+ *
+ * <p><b>Extensibility tips</b>:</p>
+ * <ul>
+ *   <li>To add a new IR node: provide a factory (mirroring {@link #binary(IR, IR, int)} etc.), register refCounts via
+ *       {@link #registerNode(IR, IR...)}, extend {@link #assignLocals(IR)} traversal, and add cases to
+ *       {@link #constantFold(IR)} / {@link #algebraicSimplify(IR)} as needed.</li>
+ *   <li>To add an optimization pass: chain it inside {@link #optimize(IR)}; prefer analysis/rewrite functions that
+ *       reuse existing factories to maintain node-state invariants.</li>
+ * </ul>
+ *
+ * @implNote The context owns all mutable compilation metadata; IR classes remain lightweight value carriers.
+ * @see #buildIR(dev.omega.arcane.ast.MolangExpression)
+ * @see #optimize(dev.omega.arcane.compiler.ir.IR)
+ * @see #assignLocals(dev.omega.arcane.compiler.ir.IR)
+ * @see #emitIR(dev.omega.arcane.compiler.ir.IR, org.objectweb.asm.MethodVisitor)
+ * @see #registerAccessor(dev.omega.arcane.reference.FloatAccessor, Object)
+ * @see #computeMathFunc(String, float, boolean)
+ * @see #computeComplexMath(String, java.util.List)
+ */
 public final class CompilerContext {
     public final MolangExpression root;
     public final List<MolangExpression> captured = new ArrayList<>();
@@ -47,6 +154,15 @@ public final class CompilerContext {
     public final List<AccessorInfo> accessorInfos = new ArrayList<>();
     public final Map<FloatAccessor<?>, Integer> accessorIndexMap = new IdentityHashMap<>();
     public final Map<MolangExpression, IR> irCache = new IdentityHashMap<>();
+
+    private static final class NodeState {
+        int refCount;
+        int local = -1;
+        boolean localInitialized;
+    }
+
+    private final IdentityHashMap<IR, NodeState> nodeStates = new IdentityHashMap<>();
+
     public final Map<Integer, Integer> accessorTrigCacheMap = new HashMap<>();
     public int nextTrigCacheIndex = 0;
 
@@ -73,6 +189,104 @@ public final class CompilerContext {
         if (local > 0) {
             freeLocals.add(local);
         }
+    }
+
+    private NodeState state(IR ir) {
+        return nodeStates.computeIfAbsent(ir, key -> new NodeState());
+    }
+
+    private void registerNode(IR ir) {
+        state(ir);
+    }
+
+    private void registerNode(IR ir, IR... children) {
+        registerNode(ir);
+        for (IR child : children) {
+            incrementRefCount(child);
+        }
+    }
+
+    private void registerNode(IR ir, Iterable<? extends IR> children) {
+        registerNode(ir);
+        for (IR child : children) {
+            incrementRefCount(child);
+        }
+    }
+
+    private void incrementRefCount(IR ir) {
+        state(ir).refCount++;
+    }
+
+    private int refCountOf(IR ir) {
+        return state(ir).refCount;
+    }
+
+    private int localOf(IR ir) {
+        return state(ir).local;
+    }
+
+    private void assignLocal(IR ir, int local) {
+        state(ir).local = local;
+    }
+
+    private ConstantIR constant(float value) {
+        ConstantIR node = new ConstantIR(value);
+        registerNode(node);
+        return node;
+    }
+
+    private AccessorIR accessor(FloatAccessor<?> accessor, Object target, int accessorIndex) {
+        AccessorIR node = new AccessorIR(accessor, target, accessorIndex);
+        registerNode(node);
+        return node;
+    }
+
+    private BinaryOpIR binary(IR left, IR right, int opcode) {
+        BinaryOpIR node = new BinaryOpIR(left, right, opcode);
+        registerNode(node, left, right);
+        return node;
+    }
+
+    private UnaryOpIR unary(IR operand, MolangTokenType operator) {
+        UnaryOpIR node = new UnaryOpIR(operand, operator);
+        registerNode(node, operand);
+        return node;
+    }
+
+    private ComparisonIR comparison(IR left, IR right, int jumpOpcode) {
+        ComparisonIR node = new ComparisonIR(left, right, jumpOpcode);
+        registerNode(node, left, right);
+        return node;
+    }
+
+    private TernaryIR ternary(IR condition, IR trueValue, IR falseValue) {
+        TernaryIR node = new TernaryIR(condition, trueValue, falseValue);
+        registerNode(node, condition, trueValue, falseValue);
+        return node;
+    }
+
+    private MathIR math(IR input, String funcName, boolean needsRadians) {
+        MathIR node = new MathIR(input, funcName, needsRadians);
+        registerNode(node, input);
+        return node;
+    }
+
+    private CachedTrigIR cachedTrig(IR input, String funcName, int cacheIndex) {
+        CachedTrigIR node = new CachedTrigIR(input, funcName, cacheIndex);
+        registerNode(node, input);
+        return node;
+    }
+
+    private ComplexMathIR complexMath(List<IR> operands, String type) {
+        ComplexMathIR node = new ComplexMathIR(operands, type);
+        registerNode(node, operands);
+        return node;
+    }
+
+    private FallbackIR fallback(MolangExpression expression, int captureIndex) {
+        FallbackIR node = new FallbackIR(expression, captureIndex);
+        registerNode(node);
+        return node;
     }
 
     @Nullable
@@ -131,64 +345,64 @@ public final class CompilerContext {
 
     public IR constantFold(IR ir) {
         if (ir instanceof BinaryOpIR binary) {
-            IR left = constantFold(binary.left);
-            IR right = constantFold(binary.right);
+            IR left = constantFold(binary.left());
+            IR right = constantFold(binary.right());
 
             if (left instanceof ConstantIR lc && right instanceof ConstantIR rc) {
-                float result = switch (binary.opcode) {
-                    case Opcodes.FADD -> lc.value + rc.value;
-                    case Opcodes.FSUB -> lc.value - rc.value;
-                    case Opcodes.FMUL -> lc.value * rc.value;
-                    case Opcodes.FDIV -> lc.value / rc.value;
-                    case Opcodes.FREM -> lc.value % rc.value;
+                float result = switch (binary.opcode()) {
+                    case Opcodes.FADD -> lc.value() + rc.value();
+                    case Opcodes.FSUB -> lc.value() - rc.value();
+                    case Opcodes.FMUL -> lc.value() * rc.value();
+                    case Opcodes.FDIV -> lc.value() / rc.value();
+                    case Opcodes.FREM -> lc.value() % rc.value();
                     default -> Float.NaN;
                 };
                 if (!Float.isNaN(result)) {
-                    return new ConstantIR(result);
+                    return constant(result);
                 }
             }
 
-            if (left != binary.left || right != binary.right) {
-                return new BinaryOpIR(left, right, binary.opcode);
+            if (left != binary.left() || right != binary.right()) {
+                return binary(left, right, binary.opcode());
             }
         } else if (ir instanceof UnaryOpIR unary) {
-            IR operand = constantFold(unary.operand);
+            IR operand = constantFold(unary.operand());
 
             if (operand instanceof ConstantIR c) {
-                float result = switch (unary.operator) {
-                    case MINUS -> -c.value;
-                    case PLUS -> c.value;
-                    case BANG -> (c.value == 0.0f || c.value == 1.0f) ? (c.value == 0.0f ? 1.0f : 0.0f) : Float.NaN;
+                float result = switch (unary.operator()) {
+                    case MINUS -> -c.value();
+                    case PLUS -> c.value();
+                    case BANG -> (c.value() == 0.0f || c.value() == 1.0f) ? (c.value() == 0.0f ? 1.0f : 0.0f) : Float.NaN;
                     default -> Float.NaN;
                 };
                 if (!Float.isNaN(result)) {
-                    return new ConstantIR(result);
+                    return constant(result);
                 }
             }
 
-            if (operand != unary.operand) {
-                return new UnaryOpIR(operand, unary.operator);
+            if (operand != unary.operand()) {
+                return unary(operand, unary.operator());
             }
         } else if (ir instanceof MathIR mathFunc) {
-            IR input = constantFold(mathFunc.input);
+            IR input = constantFold(mathFunc.input());
 
             if (input instanceof ConstantIR c) {
-                float result = computeMathFunc(mathFunc.funcName, c.value, mathFunc.needsRadians);
+                float result = computeMathFunc(mathFunc.funcName(), c.value(), mathFunc.needsRadians());
                 if (!Float.isNaN(result)) {
-                    return new ConstantIR(result);
+                    return constant(result);
                 }
             }
 
-            if (input != mathFunc.input) {
-                return new MathIR(input, mathFunc.funcName, mathFunc.needsRadians);
+            if (input != mathFunc.input()) {
+                return math(input, mathFunc.funcName(), mathFunc.needsRadians());
             }
         } else if (ir instanceof ComparisonIR comparison) {
-            IR left = constantFold(comparison.left);
-            IR right = constantFold(comparison.right);
+            IR left = constantFold(comparison.left());
+            IR right = constantFold(comparison.right());
 
             if (left instanceof ConstantIR lc && right instanceof ConstantIR rc) {
-                int cmp = Float.compare(lc.value, rc.value);
-                boolean result = switch (comparison.jumpOpcode) {
+                int cmp = Float.compare(lc.value(), rc.value());
+                boolean result = switch (comparison.jumpOpcode()) {
                     case Opcodes.IFLT -> cmp < 0;
                     case Opcodes.IFGT -> cmp > 0;
                     case Opcodes.IFLE -> cmp <= 0;
@@ -197,50 +411,50 @@ public final class CompilerContext {
                     case Opcodes.IFNE -> cmp != 0;
                     default -> false;
                 };
-                return new ConstantIR(result ? 1.0f : 0.0f);
+                return constant(result ? 1.0f : 0.0f);
             }
 
-            if (left != comparison.left || right != comparison.right) {
-                return new ComparisonIR(left, right, comparison.jumpOpcode);
+            if (left != comparison.left() || right != comparison.right()) {
+                return comparison(left, right, comparison.jumpOpcode());
             }
         } else if (ir instanceof TernaryIR ternary) {
-            IR condition = constantFold(ternary.condition);
-            IR trueValue = constantFold(ternary.trueValue);
-            IR falseValue = constantFold(ternary.falseValue);
+            IR condition = constantFold(ternary.condition());
+            IR trueValue = constantFold(ternary.trueValue());
+            IR falseValue = constantFold(ternary.falseValue());
 
             if (condition instanceof ConstantIR c) {
-                return c.value != 0.0f ? trueValue : falseValue;
+                return c.value() != 0.0f ? trueValue : falseValue;
             }
 
-            if (condition != ternary.condition || trueValue != ternary.trueValue || falseValue != ternary.falseValue) {
-                return new TernaryIR(condition, trueValue, falseValue);
+            if (condition != ternary.condition() || trueValue != ternary.trueValue() || falseValue != ternary.falseValue()) {
+                return ternary(condition, trueValue, falseValue);
             }
         } else if (ir instanceof ComplexMathIR complexMath) {
             List<IR> foldedOperands = new ArrayList<>();
             boolean changed = false;
 
-            for (IR operand : complexMath.operands) {
+            for (IR operand : complexMath.operands()) {
                 IR folded = constantFold(operand);
                 foldedOperands.add(folded);
                 if (folded != operand) changed = true;
             }
 
             if (foldedOperands.stream().allMatch(op -> op instanceof ConstantIR)) {
-                float result = computeComplexMath(complexMath.type, foldedOperands);
+                float result = computeComplexMath(complexMath.type(), foldedOperands);
                 if (!Float.isNaN(result)) {
-                    return new ConstantIR(result);
+                    return constant(result);
                 }
             }
 
             if (changed) {
-                return new ComplexMathIR(foldedOperands, complexMath.type);
+                return complexMath(foldedOperands, complexMath.type());
             }
         } else if (ir instanceof CachedTrigIR cachedTrig) {
-            IR input = constantFold(cachedTrig.input);
+            IR input = constantFold(cachedTrig.input());
 
             if (input instanceof ConstantIR c) {
-                double radians = Math.toRadians(c.value);
-                float result = (float) switch (cachedTrig.funcName) {
+                double radians = Math.toRadians(c.value());
+                float result = (float) switch (cachedTrig.funcName()) {
                     case "sin" -> Math.sin(radians);
                     case "cos" -> Math.cos(radians);
                     case "asin" -> Math.asin(radians);
@@ -249,12 +463,12 @@ public final class CompilerContext {
                     default -> Double.NaN;
                 };
                 if (!Float.isNaN(result)) {
-                    return new ConstantIR(result);
+                    return constant(result);
                 }
             }
 
-            if (input != cachedTrig.input) {
-                return new CachedTrigIR(input, cachedTrig.funcName, cachedTrig.cacheIndex);
+            if (input != cachedTrig.input()) {
+                return cachedTrig(input, cachedTrig.funcName(), cachedTrig.cacheIndex());
             }
         }
 
@@ -263,91 +477,91 @@ public final class CompilerContext {
 
     public IR algebraicSimplify(IR ir) {
         if (ir instanceof BinaryOpIR binary) {
-            IR left = algebraicSimplify(binary.left);
-            IR right = algebraicSimplify(binary.right);
+            IR left = algebraicSimplify(binary.left());
+            IR right = algebraicSimplify(binary.right());
 
-            if (binary.opcode == Opcodes.FMUL) {
-                if (right instanceof ConstantIR rc && rc.value == 0.0f) {
-                    return new ConstantIR(0.0f);
+            if (binary.opcode() == Opcodes.FMUL) {
+                if (right instanceof ConstantIR rc && rc.value() == 0.0f) {
+                    return constant(0.0f);
                 }
-                if (left instanceof ConstantIR lc && lc.value == 0.0f) {
-                    return new ConstantIR(0.0f);
+                if (left instanceof ConstantIR lc && lc.value() == 0.0f) {
+                    return constant(0.0f);
                 }
 
-                if (right instanceof ConstantIR rc && rc.value == 1.0f) {
+                if (right instanceof ConstantIR rc && rc.value() == 1.0f) {
                     return left;
                 }
-                if (left instanceof ConstantIR lc && lc.value == 1.0f) {
+                if (left instanceof ConstantIR lc && lc.value() == 1.0f) {
                     return right;
                 }
 
-                if (right instanceof ConstantIR rc && rc.value == 2.0f) {
-                    return new BinaryOpIR(left, left, Opcodes.FADD);
+                if (right instanceof ConstantIR rc && rc.value() == 2.0f) {
+                    return binary(left, left, Opcodes.FADD);
                 }
-                if (left instanceof ConstantIR lc && lc.value == 2.0f) {
-                    return new BinaryOpIR(right, right, Opcodes.FADD);
+                if (left instanceof ConstantIR lc && lc.value() == 2.0f) {
+                    return binary(right, right, Opcodes.FADD);
                 }
-            } else if (binary.opcode == Opcodes.FADD) {
-                if (right instanceof ConstantIR rc && rc.value == 0.0f) {
+            } else if (binary.opcode() == Opcodes.FADD) {
+                if (right instanceof ConstantIR rc && rc.value() == 0.0f) {
                     return left;
                 }
-                if (left instanceof ConstantIR lc && lc.value == 0.0f) {
+                if (left instanceof ConstantIR lc && lc.value() == 0.0f) {
                     return right;
                 }
-            } else if (binary.opcode == Opcodes.FSUB) {
-                if (right instanceof ConstantIR rc && rc.value == 0.0f) {
+            } else if (binary.opcode() == Opcodes.FSUB) {
+                if (right instanceof ConstantIR rc && rc.value() == 0.0f) {
                     return left;
                 }
 
-                if (left instanceof ConstantIR lc && lc.value == 0.0f) {
-                    return new UnaryOpIR(right, MolangTokenType.MINUS);
+                if (left instanceof ConstantIR lc && lc.value() == 0.0f) {
+                    return unary(right, MolangTokenType.MINUS);
                 }
-            } else if (binary.opcode == Opcodes.FDIV) {
-                if (right instanceof ConstantIR rc && rc.value == 1.0f) {
+            } else if (binary.opcode() == Opcodes.FDIV) {
+                if (right instanceof ConstantIR rc && rc.value() == 1.0f) {
                     return left;
                 }
 
-                if (left instanceof ConstantIR lc && lc.value == 0.0f) {
-                    return new ConstantIR(0.0f);
+                if (left instanceof ConstantIR lc && lc.value() == 0.0f) {
+                    return constant(0.0f);
                 }
             }
 
-            if (left != binary.left || right != binary.right) {
-                return new BinaryOpIR(left, right, binary.opcode);
+            if (left != binary.left() || right != binary.right()) {
+                return binary(left, right, binary.opcode());
             }
         } else if (ir instanceof UnaryOpIR unary) {
-            IR operand = algebraicSimplify(unary.operand);
+            IR operand = algebraicSimplify(unary.operand());
 
-            if (unary.operator == MolangTokenType.MINUS && operand instanceof UnaryOpIR inner) {
-                if (inner.operator == MolangTokenType.MINUS) {
-                    return inner.operand;
+            if (unary.operator() == MolangTokenType.MINUS && operand instanceof UnaryOpIR inner) {
+                if (inner.operator() == MolangTokenType.MINUS) {
+                    return inner.operand();
                 }
             }
 
-            if (operand != unary.operand) {
-                return new UnaryOpIR(operand, unary.operator);
+            if (operand != unary.operand()) {
+                return unary(operand, unary.operator());
             }
         } else if (ir instanceof TernaryIR ternary) {
-            return new TernaryIR(
-                    algebraicSimplify(ternary.condition),
-                    algebraicSimplify(ternary.trueValue),
-                    algebraicSimplify(ternary.falseValue)
+            return ternary(
+                    algebraicSimplify(ternary.condition()),
+                    algebraicSimplify(ternary.trueValue()),
+                    algebraicSimplify(ternary.falseValue())
             );
         } else if (ir instanceof MathIR mathFunc) {
-            return new MathIR(algebraicSimplify(mathFunc.input), mathFunc.funcName, mathFunc.needsRadians);
+            return math(algebraicSimplify(mathFunc.input()), mathFunc.funcName(), mathFunc.needsRadians());
         } else if (ir instanceof CachedTrigIR cachedTrig) {
-            return new CachedTrigIR(algebraicSimplify(cachedTrig.input), cachedTrig.funcName, cachedTrig.cacheIndex);
+            return cachedTrig(algebraicSimplify(cachedTrig.input()), cachedTrig.funcName(), cachedTrig.cacheIndex());
         } else if (ir instanceof ComplexMathIR complexMath) {
             List<IR> simplified = new ArrayList<>();
-            for (IR op : complexMath.operands) {
+            for (IR op : complexMath.operands()) {
                 simplified.add(algebraicSimplify(op));
             }
-            return new ComplexMathIR(simplified, complexMath.type);
+            return complexMath(simplified, complexMath.type());
         } else if (ir instanceof ComparisonIR comparison) {
-            return new ComparisonIR(
-                    algebraicSimplify(comparison.left),
-                    algebraicSimplify(comparison.right),
-                    comparison.jumpOpcode
+            return comparison(
+                    algebraicSimplify(comparison.left()),
+                    algebraicSimplify(comparison.right()),
+                    comparison.jumpOpcode()
             );
         }
 
@@ -380,7 +594,7 @@ public final class CompilerContext {
     public float computeComplexMath(String type, List<IR> operands) {
         try {
             List<Float> values = operands.stream()
-                    .map(op -> ((ConstantIR) op).value)
+                    .map(op -> ((ConstantIR) op).value())
                     .toList();
 
             return switch (type) {
@@ -404,31 +618,31 @@ public final class CompilerContext {
     public IR buildIR(MolangExpression expression) {
         IR cached = irCache.get(expression);
         if (cached != null) {
-            cached.refCount++;
+            incrementRefCount(cached);
             return cached;
         }
 
         IR result;
 
         if (expression instanceof ConstantExpression constant) {
-            result = new ConstantIR(constant.value());
+            result = constant(constant.value());
         } else if (expression instanceof BoundFloatAccessorExpression<?> bfa) {
             int accessorIndex = registerAccessor(bfa.accessor(), bfa.boundValue());
-            result = new AccessorIR(bfa.accessor(), bfa.boundValue(), accessorIndex);
+            result = accessor(bfa.accessor(), bfa.boundValue(), accessorIndex);
         } else if (expression instanceof AdditionExpression add) {
-            result = new BinaryOpIR(buildIR(add.left()), buildIR(add.right()), Opcodes.FADD);
+            result = binary(buildIR(add.left()), buildIR(add.right()), Opcodes.FADD);
         } else if (expression instanceof SubtractionExpression sub) {
-            result = new BinaryOpIR(buildIR(sub.left()), buildIR(sub.right()), Opcodes.FSUB);
+            result = binary(buildIR(sub.left()), buildIR(sub.right()), Opcodes.FSUB);
         } else if (expression instanceof MultiplicationExpression mul) {
-            result = new BinaryOpIR(buildIR(mul.left()), buildIR(mul.right()), Opcodes.FMUL);
+            result = binary(buildIR(mul.left()), buildIR(mul.right()), Opcodes.FMUL);
         } else if (expression instanceof DivisionExpression div) {
-            result = new BinaryOpIR(buildIR(div.left()), buildIR(div.right()), Opcodes.FDIV);
+            result = binary(buildIR(div.left()), buildIR(div.right()), Opcodes.FDIV);
         } else if (expression instanceof UnaryExpression unary) {
-            result = new UnaryOpIR(buildIR(unary.expression()), unary.operator());
+            result = unary(buildIR(unary.expression()), unary.operator());
         } else if (expression instanceof BinaryExpression binary) {
             result = buildBinaryIR(binary);
         } else if (expression instanceof TernaryExpression ternary) {
-            result = new TernaryIR(
+            result = ternary(
                     buildIR(ternary.condition()),
                     buildIR(ternary.left()),
                     buildIR(ternary.right())
@@ -436,11 +650,11 @@ public final class CompilerContext {
         } else if (expression instanceof ArithmeticExpression math) {
             result = buildMathIR(math);
         } else if (expression instanceof ReferenceExpression) {
-            result = new ConstantIR(0.0f);
+            result = constant(0.0f);
         } else {
             int captureIndex = captured.size();
             captured.add(expression);
-            result = new FallbackIR(expression, captureIndex);
+            result = fallback(expression, captureIndex);
         }
 
         irCache.put(expression, result);
@@ -453,49 +667,49 @@ public final class CompilerContext {
         IR right = buildIR(binary.right());
 
         return switch (op) {
-            case LESS_THAN -> new ComparisonIR(left, right, Opcodes.IFLT);
-            case GREATER_THAN -> new ComparisonIR(left, right, Opcodes.IFGT);
-            case LESS_THAN_OR_EQUAL -> new ComparisonIR(left, right, Opcodes.IFLE);
-            case GREATER_THAN_OR_EQUAL -> new ComparisonIR(left, right, Opcodes.IFGE);
+            case LESS_THAN -> comparison(left, right, Opcodes.IFLT);
+            case GREATER_THAN -> comparison(left, right, Opcodes.IFGT);
+            case LESS_THAN_OR_EQUAL -> comparison(left, right, Opcodes.IFLE);
+            case GREATER_THAN_OR_EQUAL -> comparison(left, right, Opcodes.IFGE);
             case DOUBLE_AMPERSAND -> buildLogicalAnd(left, right);
             case DOUBLE_PIPE -> buildLogicalOr(left, right);
             default -> {
                 int captureIndex = captured.size();
                 captured.add(binary);
-                yield new FallbackIR(binary, captureIndex);
+                yield fallback(binary, captureIndex);
             }
         };
     }
 
     public IR buildLogicalAnd(IR left, IR right) {
-        IR leftCmp = new ComparisonIR(left, new ConstantIR(0.0f), Opcodes.IFGT);
-        IR rightCmp = new ComparisonIR(right, new ConstantIR(0.0f), Opcodes.IFGT);
-        return new TernaryIR(leftCmp, rightCmp, new ConstantIR(0.0f));
+        IR leftCmp = comparison(left, constant(0.0f), Opcodes.IFGT);
+        IR rightCmp = comparison(right, constant(0.0f), Opcodes.IFGT);
+        return ternary(leftCmp, rightCmp, constant(0.0f));
     }
 
     public IR buildLogicalOr(IR left, IR right) {
-        IR leftCmp = new ComparisonIR(left, new ConstantIR(0.0f), Opcodes.IFNE);
-        IR rightCmp = new ComparisonIR(right, new ConstantIR(0.0f), Opcodes.IFNE);
-        return new TernaryIR(leftCmp, new ConstantIR(1.0f), rightCmp);
+        IR leftCmp = comparison(left, constant(0.0f), Opcodes.IFNE);
+        IR rightCmp = comparison(right, constant(0.0f), Opcodes.IFNE);
+        return ternary(leftCmp, constant(1.0f), rightCmp);
     }
 
     public IR buildMathIR(ArithmeticExpression math) {
         if (math instanceof MathExpression.Abs abs) {
-            return new MathIR(buildIR(abs.input()), "abs", false);
+            return math(buildIR(abs.input()), "abs", false);
         } else if (math instanceof MathExpression.Ceil ceil) {
-            return new MathIR(buildIR(ceil.input()), "ceil", false);
+            return math(buildIR(ceil.input()), "ceil", false);
         } else if (math instanceof MathExpression.Floor floor) {
-            return new MathIR(buildIR(floor.input()), "floor", false);
+            return math(buildIR(floor.input()), "floor", false);
         } else if (math instanceof MathExpression.Sqrt sqrt) {
-            return new MathIR(buildIR(sqrt.input()), "sqrt", false);
+            return math(buildIR(sqrt.input()), "sqrt", false);
         } else if (math instanceof MathExpression.Exp exp) {
-            return new MathIR(buildIR(exp.input()), "exp", false);
+            return math(buildIR(exp.input()), "exp", false);
         } else if (math instanceof MathExpression.Ln ln) {
-            return new MathIR(buildIR(ln.input()), "log", false);
+            return math(buildIR(ln.input()), "log", false);
         } else if (math instanceof MathExpression.Trunc trunc) {
-            return new MathIR(buildIR(trunc.input()), "trunc", false);
+            return math(buildIR(trunc.input()), "trunc", false);
         } else if (math instanceof MathExpression.Round round) {
-            return new MathIR(buildIR(round.input()), "round", false);
+            return math(buildIR(round.input()), "round", false);
         } else if (math instanceof MathExpression.Sin sin) {
             return buildCachedTrigIR(buildIR(sin.input()), "sin");
         } else if (math instanceof MathExpression.Cos cos) {
@@ -507,80 +721,80 @@ public final class CompilerContext {
         } else if (math instanceof MathExpression.Atan atan) {
             return buildCachedTrigIR(buildIR(atan.input()), "atan");
         } else if (math instanceof MathExpression.Min min) {
-            return new ComplexMathIR(List.of(buildIR(min.a()), buildIR(min.b())), "min");
+            return complexMath(List.of(buildIR(min.a()), buildIR(min.b())), "min");
         } else if (math instanceof MathExpression.Max max) {
-            return new ComplexMathIR(List.of(buildIR(max.a()), buildIR(max.b())), "max");
+            return complexMath(List.of(buildIR(max.a()), buildIR(max.b())), "max");
         } else if (math instanceof MathExpression.Pow pow) {
-            return new ComplexMathIR(List.of(buildIR(pow.base()), buildIR(pow.exponent())), "pow");
+            return complexMath(List.of(buildIR(pow.base()), buildIR(pow.exponent())), "pow");
         } else if (math instanceof MathExpression.Atan2 atan2) {
-            return new ComplexMathIR(List.of(buildIR(atan2.y()), buildIR(atan2.x())), "atan2");
+            return complexMath(List.of(buildIR(atan2.y()), buildIR(atan2.x())), "atan2");
         } else if (math instanceof MathExpression.Clamp clamp) {
-            return new ComplexMathIR(List.of(
+            return complexMath(List.of(
                     buildIR(clamp.input()),
                     buildIR(clamp.min()),
                     buildIR(clamp.max())
             ), "clamp");
         } else if (math instanceof MathExpression.Lerp lerp) {
-            return new ComplexMathIR(List.of(
+            return complexMath(List.of(
                     buildIR(lerp.input()),
                     buildIR(lerp.end()),
                     buildIR(lerp.zeroToOne())
             ), "lerp");
         } else if (math instanceof MathExpression.HermiteBlend hermite) {
-            return new ComplexMathIR(List.of(buildIR(hermite.input())), "hermiteBlend");
+            return complexMath(List.of(buildIR(hermite.input())), "hermiteBlend");
         } else if (math instanceof MathExpression.MinAngle minAngle) {
-            return new ComplexMathIR(List.of(buildIR(minAngle.input())), "minAngle");
+            return complexMath(List.of(buildIR(minAngle.input())), "minAngle");
         } else if (math instanceof MathExpression.Random random) {
-            return new ComplexMathIR(List.of(buildIR(random.low()), buildIR(random.high())), "random");
+            return complexMath(List.of(buildIR(random.low()), buildIR(random.high())), "random");
         } else if (math instanceof MathExpression.RandomInteger randomInt) {
-            return new ComplexMathIR(List.of(buildIR(randomInt.low()), buildIR(randomInt.high())), "randomInteger");
+            return complexMath(List.of(buildIR(randomInt.low()), buildIR(randomInt.high())), "randomInteger");
         } else if (math instanceof MathExpression.Mod mod) {
-            return new BinaryOpIR(buildIR(mod.value()), buildIR(mod.denominator()), Opcodes.FREM);
+            return binary(buildIR(mod.value()), buildIR(mod.denominator()), Opcodes.FREM);
         } else if (math instanceof MathExpression.Pi) {
-            return new ConstantIR((float) Math.PI);
+            return constant((float) Math.PI);
         } else {
             int captureIndex = captured.size();
             captured.add((MolangExpression) math);
-            return new FallbackIR((MolangExpression) math, captureIndex);
+            return fallback((MolangExpression) math, captureIndex);
         }
     }
 
     public IR buildCachedTrigIR(IR input, String funcName) {
         if (input instanceof AccessorIR accessorIR) {
-            Integer cacheIndex = accessorTrigCacheMap.get(accessorIR.accessorIndex);
+            Integer cacheIndex = accessorTrigCacheMap.get(accessorIR.accessorIndex());
             if (cacheIndex == null) {
                 cacheIndex = nextTrigCacheIndex++;
-                accessorTrigCacheMap.put(accessorIR.accessorIndex, cacheIndex);
+                accessorTrigCacheMap.put(accessorIR.accessorIndex(), cacheIndex);
             }
-            return new CachedTrigIR(input, funcName, cacheIndex);
+            return cachedTrig(input, funcName, cacheIndex);
         }
 
-        return new MathIR(input, funcName, true);
+        return math(input, funcName, true);
     }
 
     public void assignLocals(IR ir) {
-        if (ir.refCount > 1 && ir.local == -1) {
-            ir.local = allocateLocal();
+        if (refCountOf(ir) > 1 && localOf(ir) == -1) {
+            assignLocal(ir, allocateLocal());
         }
 
         if (ir instanceof BinaryOpIR binary) {
-            assignLocals(binary.left);
-            assignLocals(binary.right);
+            assignLocals(binary.left());
+            assignLocals(binary.right());
         } else if (ir instanceof UnaryOpIR unary) {
-            assignLocals(unary.operand);
+            assignLocals(unary.operand());
         } else if (ir instanceof ComparisonIR comparison) {
-            assignLocals(comparison.left);
-            assignLocals(comparison.right);
+            assignLocals(comparison.left());
+            assignLocals(comparison.right());
         } else if (ir instanceof TernaryIR ternary) {
-            assignLocals(ternary.condition);
-            assignLocals(ternary.trueValue);
-            assignLocals(ternary.falseValue);
+            assignLocals(ternary.condition());
+            assignLocals(ternary.trueValue());
+            assignLocals(ternary.falseValue());
         } else if (ir instanceof MathIR mathFunc) {
-            assignLocals(mathFunc.input);
+            assignLocals(mathFunc.input());
         } else if (ir instanceof CachedTrigIR cachedTrig) {
-            assignLocals(cachedTrig.input);
+            assignLocals(cachedTrig.input());
         } else if (ir instanceof ComplexMathIR complexMath) {
-            for (IR operand : complexMath.operands) {
+            for (IR operand : complexMath.operands()) {
                 assignLocals(operand);
             }
         }
@@ -657,9 +871,12 @@ public final class CompilerContext {
     }
 
     public void emitIR(IR ir, MethodVisitor mv) {
+        NodeState state = state(ir);
+        int local = state.local;
+
         // If this IR has an assigned local and it's already initialized, load it
-        if (ir.local != -1 && ir.localInitialized) {
-            mv.visitVarInsn(Opcodes.FLOAD, ir.local);
+        if (local != -1 && state.localInitialized) {
+            mv.visitVarInsn(Opcodes.FLOAD, local);
             return;
         }
 
@@ -667,10 +884,10 @@ public final class CompilerContext {
         ir.emit(mv, this);
 
         // If this IR has an assigned local, store the result and mark as initialized
-        if (ir.local != -1 && !ir.localInitialized) {
+        if (local != -1 && !state.localInitialized) {
             mv.visitInsn(Opcodes.DUP);
-            mv.visitVarInsn(Opcodes.FSTORE, ir.local);
-            ir.localInitialized = true;
+            mv.visitVarInsn(Opcodes.FSTORE, local);
+            state.localInitialized = true;
         }
     }
 }
