@@ -8,14 +8,20 @@ import dev.omega.arcane.reference.ExpressionBindingContext;
 import dev.omega.arcane.reference.FloatAccessor;
 import dev.omega.arcane.reference.ReferenceType;
 import org.openjdk.jmh.annotations.Benchmark;
+import org.openjdk.jmh.annotations.Fork;
+import org.openjdk.jmh.annotations.Measurement;
 import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.annotations.Threads;
+import org.openjdk.jmh.annotations.Warmup;
 
-@org.openjdk.jmh.annotations.Warmup(iterations = 1, time = 5000, timeUnit = java.util.concurrent.TimeUnit.MILLISECONDS)
-@org.openjdk.jmh.annotations.Measurement(iterations = 5, time = 5000, timeUnit = java.util.concurrent.TimeUnit.MILLISECONDS)
-@org.openjdk.jmh.annotations.Fork(1)
-@org.openjdk.jmh.annotations.Threads(1)
+import java.util.concurrent.TimeUnit;
+
+@Warmup(iterations = 1, time = 5000, timeUnit = TimeUnit.MILLISECONDS)
+@Measurement(iterations = 5, time = 5000, timeUnit = TimeUnit.MILLISECONDS)
+@Fork(1)
+@Threads(1)
 @State(Scope.Benchmark)
 public class MolangEvaluationBenchmark {
 

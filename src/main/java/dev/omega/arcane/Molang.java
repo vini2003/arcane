@@ -5,7 +5,6 @@ import dev.omega.arcane.exception.MolangLexException;
 import dev.omega.arcane.exception.MolangParseException;
 import dev.omega.arcane.parser.MolangParser;
 import dev.omega.arcane.ast.MolangExpression;
-import dev.omega.arcane.codegen.ExpressionCompiler;
 import org.jetbrains.annotations.ApiStatus;
 
 import java.util.Random;

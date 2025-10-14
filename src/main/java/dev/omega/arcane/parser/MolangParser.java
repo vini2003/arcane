@@ -6,7 +6,7 @@ import dev.omega.arcane.ast.operator.AdditionExpression;
 import dev.omega.arcane.ast.operator.DivisionExpression;
 import dev.omega.arcane.ast.operator.MultiplicationExpression;
 import dev.omega.arcane.ast.operator.SubtractionExpression;
-import dev.omega.arcane.codegen.ExpressionCompiler;
+import dev.omega.arcane.compiler.ExpressionCompiler;
 import dev.omega.arcane.reference.ReferenceType;
 import dev.omega.arcane.exception.MolangLexException;
 import dev.omega.arcane.exception.MolangParseException;

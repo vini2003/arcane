@@ -1,6 +1,6 @@
 # Arcane `ExpressionCompiler` — Deep Dive & Worked Examples
 
-> Package: `dev.omega.arcane.codegen`
+> Package: `dev.omega.arcane.compiler`
 
 This document explains **how the JIT compiler for Molang expressions works end‑to‑end**: inputs, IR, optimizations, bytecode emission via ASM, runtime layout, and evaluation path. It also walks through two **fully worked examples**:
 
