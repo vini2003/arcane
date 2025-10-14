@@ -20,6 +20,14 @@ dependencies {
 
 test {
     useJUnitPlatform()
+
+    testLogging {
+        events "passed", "skipped", "failed"          // add "standard_out", "standard_error" if you want stdout/
+        exceptionFormat "full"                        // full stack trace instead of the default short form
+        showCauses true
+        showExceptions true
+        showStackTraces true
+    }
 }
 
 java {

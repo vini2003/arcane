@@ -16,7 +16,7 @@ import org.objectweb.asm.Opcodes;
  */
 public interface IR {
     static void pushFloat(MethodVisitor mv, float value) {
-        if (value == 0.0f) {
+        if (Float.floatToRawIntBits(value) == Float.floatToRawIntBits(0.0f)) {
             mv.visitInsn(Opcodes.FCONST_0);
         } else if (value == 1.0f) {
             mv.visitInsn(Opcodes.FCONST_1);
