@@ -1,3 +1,6 @@
+import org.gradle.api.artifacts.repositories.PasswordCredentials
+import org.gradle.authentication.http.BasicAuthentication
+
 plugins {
     id 'java'
     id 'maven-publish'
@@ -5,7 +8,7 @@ plugins {
 }
 
 group = 'dev.omega'
-version = '0.1.6'
+version = '0.1.10'
 
 repositories {
     mavenCentral()
@@ -35,13 +38,20 @@ java {
 }
 
 publishing {
+    repositories {
+        maven {
+            name = "karlRepository"
+            url = "https://mvn.krl.dev/releases"
+            credentials(PasswordCredentials)
+            authentication {
+                basic(BasicAuthentication)
+            }
+        }
+    }
+
     publications {
         mavenJava(MavenPublication) {
             from components.java
         }
-    }
-
-    repositories {
-        mavenLocal()
     }
 }

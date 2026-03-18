@@ -3,9 +3,12 @@ package dev.omega.arcane.compiler;
 import dev.omega.arcane.Molang;
 import dev.omega.arcane.ast.ConstantExpression;
 import dev.omega.arcane.ast.MolangExpression;
+import dev.omega.arcane.compiler.ir.IR;
 
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
+import java.lang.reflect.Constructor;
 
 /**
  * Highly optimized JIT compiler for Molang expressions.
@@ -21,6 +24,7 @@ public final class Compiler {
     public static final String FLOAT_ACCESSOR_INTERNAL = "dev/omega/arcane/reference/FloatAccessor";
 
     public static final ExpressionClassLoader CLASS_LOADER = new ExpressionClassLoader(Compiler.class.getClassLoader());
+    private static final ConcurrentHashMap<CompileShapeKey, Constructor<?>> CONSTRUCTOR_CACHE = new ConcurrentHashMap<>();
 
     private Compiler() {
     }
@@ -39,7 +43,24 @@ public final class Compiler {
         try {
             // Evaluate and compile the expression.
             CompilerContext context = new CompilerContext(expression);
-            CompiledEvaluator evaluator = context.compile();
+            IR rootIR = context.prepare();
+            var shapeKey = new CompileShapeKey(
+                    context.irFingerprint(),
+                    context.bindingFingerprint(),
+                    context.accessorCount(),
+                    context.capturedCount()
+            );
+
+            Constructor<?> constructor = CONSTRUCTOR_CACHE.get(shapeKey);
+            if (constructor == null) {
+                constructor = context.compileConstructor(rootIR);
+                Constructor<?> existing = CONSTRUCTOR_CACHE.putIfAbsent(shapeKey, constructor);
+                if (existing != null) {
+                    constructor = existing;
+                }
+            }
+
+            CompiledEvaluator evaluator = context.instantiate(constructor);
 
             // "evaluator" is the compiled/generated class. If compilation failed,
             // we return the expression itself to avoid stalling the pipeline.
@@ -63,5 +84,13 @@ public final class Compiler {
         public Class<?> define(String name, byte[] bytecode) {
             return defineClass(name, bytecode, 0, bytecode.length);
         }
+    }
+
+    private record CompileShapeKey(
+            long irFingerprint,
+            long bindingFingerprint,
+            int accessorCount,
+            int capturedCount
+    ) {
     }
 }

@@ -173,6 +173,8 @@ public final class CompilerContext {
 
     public int nextLocal = 1;
     public final List<Integer> freeLocals = new ArrayList<>();
+    private final IdentityHashMap<IR, Long> fingerprintCache = new IdentityHashMap<>();
+    private long irFingerprint;
 
     CompilerContext(MolangExpression root) {
         this.root = root;
@@ -311,13 +313,112 @@ public final class CompilerContext {
         return node;
     }
 
-    @Nullable
-    public CompiledEvaluator compile() throws ReflectiveOperationException {
+    public IR prepare() {
         IR rootIR = buildIR(root);
         rootIR = optimize(rootIR);
         rootIR.collectAccessors(this);
-        assignLocals(rootIR);
+        irFingerprint = assignLocalsAndFingerprint(rootIR);
+        return rootIR;
+    }
 
+    public long irFingerprint() {
+        return irFingerprint;
+    }
+
+    public long bindingFingerprint() {
+        long hash = 0x7f4a7c159e3779b9L;
+        hash = mix(hash, accessorInfos.size());
+        hash = mix(hash, captured.size());
+
+        for (var info : accessorInfos) {
+            hash = mix(hash, info.isSpecialized ? 1L : 0L);
+            hash = mix(hash, info.targetClass.hashCode());
+        }
+
+        return hash;
+    }
+
+    public int accessorCount() {
+        return accessorInfos.size();
+    }
+
+    public int capturedCount() {
+        return captured.size();
+    }
+
+    private long assignLocalsAndFingerprint(IR ir) {
+        var cached = fingerprintCache.get(ir);
+        if (cached != null) {
+            return cached;
+        }
+
+        if (refCountOf(ir) > 1 && localOf(ir) == -1) {
+            assignLocal(ir, allocateLocal());
+        }
+
+        long hash = 0x9e3779b97f4a7c15L;
+
+        if (ir instanceof ConstantIR value) {
+            hash = mix(hash, 1L);
+            hash = mix(hash, Float.floatToRawIntBits(value.value()));
+        } else if (ir instanceof AccessorIR accessor) {
+            hash = mix(hash, 2L);
+            hash = mix(hash, accessor.accessorIndex());
+        } else if (ir instanceof BinaryOpIR binary) {
+            hash = mix(hash, 3L);
+            hash = mix(hash, binary.opcode());
+            hash = mix(hash, assignLocalsAndFingerprint(binary.left()));
+            hash = mix(hash, assignLocalsAndFingerprint(binary.right()));
+        } else if (ir instanceof UnaryOpIR unary) {
+            hash = mix(hash, 4L);
+            hash = mix(hash, unary.operator().ordinal());
+            hash = mix(hash, assignLocalsAndFingerprint(unary.operand()));
+        } else if (ir instanceof ComparisonIR comparison) {
+            hash = mix(hash, 5L);
+            hash = mix(hash, comparison.jumpOpcode());
+            hash = mix(hash, assignLocalsAndFingerprint(comparison.left()));
+            hash = mix(hash, assignLocalsAndFingerprint(comparison.right()));
+        } else if (ir instanceof TernaryIR ternary) {
+            hash = mix(hash, 6L);
+            hash = mix(hash, assignLocalsAndFingerprint(ternary.condition()));
+            hash = mix(hash, assignLocalsAndFingerprint(ternary.trueValue()));
+            hash = mix(hash, assignLocalsAndFingerprint(ternary.falseValue()));
+        } else if (ir instanceof MathIR mathFunc) {
+            hash = mix(hash, 7L);
+            hash = mix(hash, mathFunc.funcName().hashCode());
+            hash = mix(hash, mathFunc.needsRadians() ? 1L : 0L);
+            hash = mix(hash, assignLocalsAndFingerprint(mathFunc.input()));
+        } else if (ir instanceof CachedTrigIR cachedTrig) {
+            hash = mix(hash, 8L);
+            hash = mix(hash, cachedTrig.funcName().hashCode());
+            hash = mix(hash, cachedTrig.cacheIndex());
+            hash = mix(hash, cachedTrig.convertInputToRadians() ? 1L : 0L);
+            hash = mix(hash, assignLocalsAndFingerprint(cachedTrig.input()));
+        } else if (ir instanceof ComplexMathIR complexMath) {
+            hash = mix(hash, 9L);
+            hash = mix(hash, complexMath.type().hashCode());
+            hash = mix(hash, complexMath.operands().size());
+            for (IR operand : complexMath.operands()) {
+                hash = mix(hash, assignLocalsAndFingerprint(operand));
+            }
+        } else if (ir instanceof FallbackIR fallback) {
+            hash = mix(hash, 10L);
+            hash = mix(hash, fallback.captureIndex());
+        } else {
+            hash = mix(hash, 11L);
+            hash = mix(hash, ir.getClass().getName().hashCode());
+        }
+
+        fingerprintCache.put(ir, hash);
+        return hash;
+    }
+
+    private static long mix(long state, long value) {
+        state ^= value + 0x9e3779b97f4a7c15L + (state << 6) + (state >>> 2);
+        return state;
+    }
+
+    public Constructor<?> compileConstructor(IR rootIR) throws ReflectiveOperationException {
         ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
         internalName = "dev/omega/arcane/generated/CompiledExpression$" + Compiler.CLASS_COUNTER.incrementAndGet();
 
@@ -340,7 +441,6 @@ public final class CompilerContext {
 
         emitConstructor(writer);
         emitEvaluate(writer, rootIR);
-
         writer.visitEnd();
 
         byte[] bytecode = writer.toByteArray();
@@ -351,12 +451,20 @@ public final class CompilerContext {
                 Object[].class
         );
         constructor.setAccessible(true);
+        return constructor;
+    }
 
+    public CompiledEvaluator instantiate(Constructor<?> constructor) throws ReflectiveOperationException {
         MolangExpression[] capturedArray = captured.toArray(new MolangExpression[0]);
         FloatAccessor<?>[] accessorArray = accessors.toArray(new FloatAccessor[0]);
         Object[] targetArray = targets.toArray(new Object[0]);
-
         return (CompiledEvaluator) constructor.newInstance(capturedArray, accessorArray, targetArray);
+    }
+
+    @Nullable
+    public CompiledEvaluator compile() throws ReflectiveOperationException {
+        IR rootIR = prepare();
+        return instantiate(compileConstructor(rootIR));
     }
 
     public IR optimize(IR ir) {
