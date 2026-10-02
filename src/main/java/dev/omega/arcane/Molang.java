@@ -5,6 +5,7 @@ import dev.omega.arcane.exception.MolangLexException;
 import dev.omega.arcane.exception.MolangParseException;
 import dev.omega.arcane.parser.MolangParser;
 import dev.omega.arcane.ast.MolangExpression;
+import dev.omega.arcane.random.MolangRandomSource;
 import org.jetbrains.annotations.ApiStatus;
 
 import java.util.Random;
@@ -16,7 +17,12 @@ import java.util.logging.Logger;
 public class Molang {
 
     public static final Random RANDOM = new Random();
+    public static final MolangRandomSource DEFAULT_RANDOM_SOURCE = RANDOM::nextFloat;
     public static final Logger LOGGER = Logger.getLogger("Arcane Molang");
+
+    public static float nextRandomFloat() {
+        return DEFAULT_RANDOM_SOURCE.nextFloat();
+    }
 
     /**
      * Evaluate the MoLang contained in the {@link String} into a {@link Float} value.

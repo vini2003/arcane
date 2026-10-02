@@ -22,9 +22,11 @@ import dev.omega.arcane.compiler.ir.ConstantIR;
 import dev.omega.arcane.compiler.ir.FallbackIR;
 import dev.omega.arcane.compiler.ir.IR;
 import dev.omega.arcane.compiler.ir.MathIR;
+import dev.omega.arcane.compiler.ir.RandomSourceIR;
 import dev.omega.arcane.compiler.ir.TernaryIR;
 import dev.omega.arcane.compiler.ir.UnaryOpIR;
 import dev.omega.arcane.lexer.MolangTokenType;
+import dev.omega.arcane.random.MolangRandomSource;
 import dev.omega.arcane.reference.BoundFloatAccessorExpression;
 import dev.omega.arcane.reference.FloatAccessor;
 import org.jetbrains.annotations.Nullable;
@@ -93,7 +95,7 @@ import java.util.Map;
  *       {@link #emitIR(IR, MethodVisitor)} stores the computed float and marks it initialized in {@link #nodeStates}.
  *       Subsequent uses load via {@code FLOAD}.</li>
  *   <li>Accessor values cache into {@link #accessorValueLocals}. Trig nodes cache both input and output locals
- *       by stable cache index derived from their driving accessor ({@link #accessorTrigCacheMap}, {@link #nextTrigCacheIndex}).</li>
+ *       by stable cache index derived from their driving accessor and function ({@link #accessorTrigCacheMap}, {@link #nextTrigCacheIndex}).</li>
  * </ul>
  *
  * <p><b>Math folding</b>:</p>
@@ -147,6 +149,8 @@ import java.util.Map;
  * @see #computeComplexMath(String, java.util.List)
  */
 public final class CompilerContext {
+    private static final FloatAccessor<MolangRandomSource> RANDOM_SOURCE_ACCESSOR = MolangRandomSource::nextFloat;
+
     public final MolangExpression root;
     public final List<MolangExpression> captured = new ArrayList<>();
     public final List<FloatAccessor<?>> accessors = new ArrayList<>();
@@ -163,7 +167,7 @@ public final class CompilerContext {
 
     private final IdentityHashMap<IR, NodeState> nodeStates = new IdentityHashMap<>();
 
-    public final Map<Integer, Integer> accessorTrigCacheMap = new HashMap<>();
+    public final Map<String, Integer> accessorTrigCacheMap = new HashMap<>();
     public int nextTrigCacheIndex = 0;
 
     public String internalName;
@@ -190,6 +194,61 @@ public final class CompilerContext {
     public void releaseLocal(int local) {
         if (local > 0) {
             freeLocals.add(local);
+        }
+    }
+
+    /**
+     * Opens a conditionally executed region. Values cached inside it are not definitely assigned once it ends, so
+     * {@link #exitBranch(BranchScope)} forgets them and later uses evaluate again instead of loading an unset local.
+     */
+    public BranchScope enterBranch() {
+        var initialized = new ArrayList<NodeState>();
+
+        for (var state : nodeStates.values()) {
+            if (state.localInitialized) {
+                initialized.add(state);
+            }
+        }
+
+        return new BranchScope(
+                new HashMap<>(accessorValueLocals),
+                new HashMap<>(trigInputLocals),
+                new HashMap<>(trigOutputLocals),
+                initialized);
+    }
+
+    public void exitBranch(BranchScope scope) {
+        accessorValueLocals.clear();
+        accessorValueLocals.putAll(scope.accessorValueLocals);
+        trigInputLocals.clear();
+        trigInputLocals.putAll(scope.trigInputLocals);
+        trigOutputLocals.clear();
+        trigOutputLocals.putAll(scope.trigOutputLocals);
+
+        for (var state : nodeStates.values()) {
+            state.localInitialized = false;
+        }
+
+        for (var state : scope.initialized) {
+            state.localInitialized = true;
+        }
+    }
+
+    public static final class BranchScope {
+        private final Map<Integer, Integer> accessorValueLocals;
+        private final Map<Integer, Integer> trigInputLocals;
+        private final Map<Integer, Integer> trigOutputLocals;
+        private final List<NodeState> initialized;
+
+        private BranchScope(
+                Map<Integer, Integer> accessorValueLocals,
+                Map<Integer, Integer> trigInputLocals,
+                Map<Integer, Integer> trigOutputLocals,
+                List<NodeState> initialized) {
+            this.accessorValueLocals = accessorValueLocals;
+            this.trigInputLocals = trigInputLocals;
+            this.trigOutputLocals = trigOutputLocals;
+            this.initialized = initialized;
         }
     }
 
@@ -307,6 +366,25 @@ public final class CompilerContext {
         return node;
     }
 
+    private RandomSourceIR randomSource(MolangRandomSource source) {
+        var accessorIndex = source != null ? registerAccessor(RANDOM_SOURCE_ACCESSOR, source) : -1;
+        RandomSourceIR node = new RandomSourceIR(source != null ? RANDOM_SOURCE_ACCESSOR : null, source, accessorIndex);
+        registerNode(node);
+        return node;
+    }
+
+    private IR randomRange(IR low, IR high, MolangRandomSource source) {
+        var range = binary(high, low, Opcodes.FSUB);
+        return binary(low, binary(randomSource(source), range, Opcodes.FMUL), Opcodes.FADD);
+    }
+
+    private IR randomIntegerRange(IR low, IR high, MolangRandomSource source) {
+        var inclusiveHigh = binary(high, constant(0.999F), Opcodes.FADD);
+        var range = binary(inclusiveHigh, low, Opcodes.FSUB);
+        var value = binary(low, binary(randomSource(source), range, Opcodes.FMUL), Opcodes.FADD);
+        return math(value, "trunc", false);
+    }
+
     private FallbackIR fallback(MolangExpression expression, int captureIndex) {
         FallbackIR node = new FallbackIR(expression, captureIndex);
         registerNode(node);
@@ -404,8 +482,11 @@ public final class CompilerContext {
         } else if (ir instanceof FallbackIR fallback) {
             hash = mix(hash, 10L);
             hash = mix(hash, fallback.captureIndex());
-        } else {
+        } else if (ir instanceof RandomSourceIR randomSource) {
             hash = mix(hash, 11L);
+            hash = mix(hash, randomSource.accessorIndex());
+        } else {
+            hash = mix(hash, 12L);
             hash = mix(hash, ir.getClass().getName().hashCode());
         }
 
@@ -868,9 +949,13 @@ public final class CompilerContext {
         } else if (math instanceof MathExpression.MinAngle minAngle) {
             return complexMath(List.of(buildIR(minAngle.input())), "minAngle");
         } else if (math instanceof MathExpression.Random random) {
-            return complexMath(List.of(buildIR(random.low()), buildIR(random.high())), "random");
+            return randomRange(buildIR(random.low()), buildIR(random.high()), null);
         } else if (math instanceof MathExpression.RandomInteger randomInt) {
-            return complexMath(List.of(buildIR(randomInt.low()), buildIR(randomInt.high())), "randomInteger");
+            return randomIntegerRange(buildIR(randomInt.low()), buildIR(randomInt.high()), null);
+        } else if (math instanceof MathExpression.BoundRandom random) {
+            return randomRange(buildIR(random.low()), buildIR(random.high()), random.randomSource());
+        } else if (math instanceof MathExpression.BoundRandomInteger randomInt) {
+            return randomIntegerRange(buildIR(randomInt.low()), buildIR(randomInt.high()), randomInt.randomSource());
         } else if (math instanceof MathExpression.Mod mod) {
             return binary(buildIR(mod.value()), buildIR(mod.denominator()), Opcodes.FREM);
         } else if (math instanceof MathExpression.Pi) {
@@ -889,10 +974,11 @@ public final class CompilerContext {
     public IR buildCachedTrigIR(IR input, String funcName) {
         boolean convertToRadians = trigInputUsesDegrees(funcName);
         if (input instanceof AccessorIR accessorIR) {
-            Integer cacheIndex = accessorTrigCacheMap.get(accessorIR.accessorIndex());
+            String cacheKey = accessorIR.accessorIndex() + ":" + funcName;
+            Integer cacheIndex = accessorTrigCacheMap.get(cacheKey);
             if (cacheIndex == null) {
                 cacheIndex = nextTrigCacheIndex++;
-                accessorTrigCacheMap.put(accessorIR.accessorIndex(), cacheIndex);
+                accessorTrigCacheMap.put(cacheKey, cacheIndex);
             }
             return cachedTrig(input, funcName, cacheIndex, convertToRadians);
         }

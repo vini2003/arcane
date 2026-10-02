@@ -7,8 +7,8 @@ import org.objectweb.asm.Opcodes;
 import java.util.List;
 
 /**
- * IR node for composite math utilities: min, max, pow, atan2, clamp, lerp, hermiteBlend,
- * minAngle, random, randomInteger.
+ * IR node for composite math utilities: min, max, pow, atan2, clamp, lerp,
+ * hermiteBlend, and minAngle.
  */
 public record ComplexMathIR(List<IR> operands, String type) implements IR {
     @Override
@@ -127,54 +127,6 @@ public record ComplexMathIR(List<IR> operands, String type) implements IR {
                 mv.visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/Math", "min", "(FF)F", false);
 
                 ctx.releaseLocal(midLocal);
-                break;
-            case "random":
-                ctx.emitIR(operands.get(0), mv);
-                int lowLocal = ctx.allocateLocal();
-                mv.visitVarInsn(Opcodes.FSTORE, lowLocal);
-
-                ctx.emitIR(operands.get(1), mv);
-                int highLocal = ctx.allocateLocal();
-                mv.visitVarInsn(Opcodes.FSTORE, highLocal);
-
-                mv.visitFieldInsn(Opcodes.GETSTATIC, dev.omega.arcane.compiler.Compiler.RANDOM_FIELD_OWNER, "RANDOM", dev.omega.arcane.compiler.Compiler.RANDOM_FIELD_DESC);
-                mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/util/Random", "nextFloat", "()F", false);
-
-                mv.visitVarInsn(Opcodes.FLOAD, highLocal);
-                mv.visitVarInsn(Opcodes.FLOAD, lowLocal);
-                mv.visitInsn(Opcodes.FSUB);
-                mv.visitInsn(Opcodes.FMUL);
-                mv.visitVarInsn(Opcodes.FLOAD, lowLocal);
-                mv.visitInsn(Opcodes.FADD);
-
-                ctx.releaseLocal(lowLocal);
-                ctx.releaseLocal(highLocal);
-                break;
-            case "randomInteger":
-                ctx.emitIR(operands.get(0), mv);
-                int lowLocal2 = ctx.allocateLocal();
-                mv.visitVarInsn(Opcodes.FSTORE, lowLocal2);
-
-                ctx.emitIR(operands.get(1), mv);
-                int highLocal2 = ctx.allocateLocal();
-                mv.visitVarInsn(Opcodes.FSTORE, highLocal2);
-
-                mv.visitFieldInsn(Opcodes.GETSTATIC, dev.omega.arcane.compiler.Compiler.RANDOM_FIELD_OWNER, "RANDOM", dev.omega.arcane.compiler.Compiler.RANDOM_FIELD_DESC);
-                mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/util/Random", "nextFloat", "()F", false);
-
-                mv.visitVarInsn(Opcodes.FLOAD, highLocal2);
-                IR.pushFloat(mv, 0.999f);
-                mv.visitInsn(Opcodes.FADD);
-                mv.visitVarInsn(Opcodes.FLOAD, lowLocal2);
-                mv.visitInsn(Opcodes.FSUB);
-                mv.visitInsn(Opcodes.FMUL);
-                mv.visitVarInsn(Opcodes.FLOAD, lowLocal2);
-                mv.visitInsn(Opcodes.FADD);
-                mv.visitInsn(Opcodes.F2I);
-                mv.visitInsn(Opcodes.I2F);
-
-                ctx.releaseLocal(lowLocal2);
-                ctx.releaseLocal(highLocal2);
                 break;
         }
     }

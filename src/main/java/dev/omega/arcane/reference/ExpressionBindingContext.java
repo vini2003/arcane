@@ -2,7 +2,7 @@ package dev.omega.arcane.reference;
 
 import dev.omega.arcane.ast.MolangExpression;
 import dev.omega.arcane.ast.ObjectAwareExpression;
-import dev.omega.arcane.reference.BoundFloatAccessorExpression;
+import dev.omega.arcane.random.MolangRandomSource;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -17,6 +17,7 @@ import java.util.function.Supplier;
 public class ExpressionBindingContext {
 
     private final Map<ReferenceType, List<Binder<?>>> evaluators = new HashMap<>();
+    private final List<RandomSourceBinder<?>> randomSources = new ArrayList<>();
 
     private ExpressionBindingContext() {
 
@@ -78,6 +79,29 @@ public class ExpressionBindingContext {
     public ExpressionBindingContext registerDirectReferenceResolver(ReferenceType type, String value, Supplier<Float> mapper) {
         getTypeEvaluator(type).add(new SupplierBinder<>(value, () -> new DynamicObjectAwareExpression<>(null, (any) -> mapper.get())));
         return this;
+    }
+
+    @ApiStatus.Experimental
+    public <T> ExpressionBindingContext registerRandomSource(Class<T> objectClass, Function<T, MolangRandomSource> mapper) {
+        randomSources.add(new RandomSourceBinder<>(objectClass, mapper));
+        return this;
+    }
+
+    @ApiStatus.Internal
+    @Nullable
+    public MolangRandomSource bindRandomSource(Object... values) {
+        if (randomSources.isEmpty() || values == null) {
+            return null;
+        }
+
+        for (var binder : randomSources) {
+            var source = binder.bind(values);
+            if (source != null) {
+                return source;
+            }
+        }
+
+        return null;
     }
 
     @ApiStatus.Internal
@@ -161,6 +185,24 @@ public class ExpressionBindingContext {
         public ObjectAwareExpression<T> bind(@Nullable T value) {
             //noinspection unchecked
             return (ObjectAwareExpression<T>) mapper.get();
+        }
+    }
+
+    private record RandomSourceBinder<T>(Class<T> value, Function<T, MolangRandomSource> mapper) {
+        @Nullable
+        @SuppressWarnings("unchecked")
+        MolangRandomSource bind(Object[] values) {
+            if (value == null || mapper == null || values == null) {
+                return null;
+            }
+
+            for (var candidate : values) {
+                if (candidate != null && value.isAssignableFrom(candidate.getClass())) {
+                    return mapper.apply((T) candidate);
+                }
+            }
+
+            return null;
         }
     }
 }

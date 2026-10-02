@@ -3,7 +3,9 @@ package dev.omega.arcane.ast.math;
 import dev.omega.arcane.Molang;
 import dev.omega.arcane.ast.ArithmeticExpression;
 import dev.omega.arcane.ast.MolangExpression;
+import dev.omega.arcane.random.MolangRandomSource;
 import dev.omega.arcane.reference.ExpressionBindingContext;
+import org.jetbrains.annotations.Nullable;
 
 public abstract class MathExpression {
 
@@ -119,7 +121,7 @@ public abstract class MathExpression {
             float sum = 0.0f;
 
             for(int i = 0; i < (int) num.evaluate(); i++) {
-                sum += low.evaluate() + Molang.RANDOM.nextFloat() * high.evaluate();
+                sum += low.evaluate() + Molang.nextRandomFloat() * high.evaluate();
             }
 
             return sum;
@@ -127,6 +129,10 @@ public abstract class MathExpression {
 
         @Override
         public MolangExpression bind(ExpressionBindingContext context, Object... values) {
+            MolangRandomSource randomSource = randomSource(context, values);
+            if (randomSource != null) {
+                return new BoundDieRoll(num.bind(context, values), low.bind(context, values), high.bind(context, values), randomSource);
+            }
             return new DieRoll(num.bind(context, values), low.bind(context, values), high.bind(context, values));
         }
     }
@@ -138,7 +144,7 @@ public abstract class MathExpression {
             float sum = 0.0f;
 
             for(int i = 0; i < (int) num.evaluate(); i++) {
-                sum += (int) low.evaluate() + (int) (Molang.RANDOM.nextFloat() * high.evaluate());
+                sum += (int) low.evaluate() + (int) (Molang.nextRandomFloat() * high.evaluate());
             }
 
             return sum;
@@ -146,6 +152,10 @@ public abstract class MathExpression {
 
         @Override
         public MolangExpression bind(ExpressionBindingContext context, Object... values) {
+            MolangRandomSource randomSource = randomSource(context, values);
+            if (randomSource != null) {
+                return new BoundDieRollInteger(num.bind(context, values), low.bind(context, values), high.bind(context, values), randomSource);
+            }
             return new DieRollInteger(num.bind(context, values), low.bind(context, values), high.bind(context, values));
         }
     }
@@ -290,11 +300,15 @@ public abstract class MathExpression {
         public float evaluate() {
             float low = this.low.evaluate();
             float high = this.high.evaluate();
-            return low + Molang.RANDOM.nextFloat() * (high - low);
+            return low + Molang.nextRandomFloat() * (high - low);
         }
 
         @Override
         public MolangExpression bind(ExpressionBindingContext context, Object... values) {
+            MolangRandomSource randomSource = randomSource(context, values);
+            if (randomSource != null) {
+                return new BoundRandom(low.bind(context, values), high.bind(context, values), randomSource);
+            }
             return new Random(low.bind(context, values), high.bind(context, values));
         }
     }
@@ -305,11 +319,15 @@ public abstract class MathExpression {
         public float evaluate() {
             // high is inclusive, so we add 'close-to-1' value to give high value ane qual chance at being picked
             float low = this.low.evaluate();
-            return (int) (low + Molang.RANDOM.nextFloat() * (high.evaluate() + 0.999 - low));
+            return (int) (low + Molang.nextRandomFloat() * (high.evaluate() + 0.999 - low));
         }
 
         @Override
         public MolangExpression bind(ExpressionBindingContext context, Object... values) {
+            MolangRandomSource randomSource = randomSource(context, values);
+            if (randomSource != null) {
+                return new BoundRandomInteger(low.bind(context, values), high.bind(context, values), randomSource);
+            }
             return new RandomInteger(low.bind(context, values), high.bind(context, values));
         }
     }
@@ -377,5 +395,95 @@ public abstract class MathExpression {
         public MolangExpression bind(ExpressionBindingContext context, Object... values) {
             return new Round(input.bind(context, values));
         }
+    }
+
+    public record BoundDieRoll(MolangExpression num, MolangExpression low, MolangExpression high, MolangRandomSource randomSource) implements MolangExpression, ArithmeticExpression {
+        @Override
+        public float evaluate() {
+            float sum = 0.0f;
+
+            for(int i = 0; i < (int) num.evaluate(); i++) {
+                sum += low.evaluate() + randomSource.nextFloat() * high.evaluate();
+            }
+
+            return sum;
+        }
+
+        @Override
+        public MolangExpression bind(ExpressionBindingContext context, Object... values) {
+            MolangRandomSource boundRandomSource = MathExpression.randomSource(context, values);
+            return new BoundDieRoll(
+                    num.bind(context, values),
+                    low.bind(context, values),
+                    high.bind(context, values),
+                    boundRandomSource != null ? boundRandomSource : randomSource
+            );
+        }
+    }
+
+    public record BoundDieRollInteger(MolangExpression num, MolangExpression low, MolangExpression high, MolangRandomSource randomSource) implements MolangExpression, ArithmeticExpression {
+        @Override
+        public float evaluate() {
+            float sum = 0.0f;
+
+            for(int i = 0; i < (int) num.evaluate(); i++) {
+                sum += (int) low.evaluate() + (int) (randomSource.nextFloat() * high.evaluate());
+            }
+
+            return sum;
+        }
+
+        @Override
+        public MolangExpression bind(ExpressionBindingContext context, Object... values) {
+            MolangRandomSource boundRandomSource = MathExpression.randomSource(context, values);
+            return new BoundDieRollInteger(
+                    num.bind(context, values),
+                    low.bind(context, values),
+                    high.bind(context, values),
+                    boundRandomSource != null ? boundRandomSource : randomSource
+            );
+        }
+    }
+
+    public record BoundRandom(MolangExpression low, MolangExpression high, MolangRandomSource randomSource) implements MolangExpression, ArithmeticExpression {
+        @Override
+        public float evaluate() {
+            float low = this.low.evaluate();
+            float high = this.high.evaluate();
+            return low + randomSource.nextFloat() * (high - low);
+        }
+
+        @Override
+        public MolangExpression bind(ExpressionBindingContext context, Object... values) {
+            MolangRandomSource boundRandomSource = MathExpression.randomSource(context, values);
+            return new BoundRandom(
+                    low.bind(context, values),
+                    high.bind(context, values),
+                    boundRandomSource != null ? boundRandomSource : randomSource
+            );
+        }
+    }
+
+    public record BoundRandomInteger(MolangExpression low, MolangExpression high, MolangRandomSource randomSource) implements MolangExpression, ArithmeticExpression {
+        @Override
+        public float evaluate() {
+            float low = this.low.evaluate();
+            return (int) (low + randomSource.nextFloat() * (high.evaluate() + 0.999 - low));
+        }
+
+        @Override
+        public MolangExpression bind(ExpressionBindingContext context, Object... values) {
+            MolangRandomSource boundRandomSource = MathExpression.randomSource(context, values);
+            return new BoundRandomInteger(
+                    low.bind(context, values),
+                    high.bind(context, values),
+                    boundRandomSource != null ? boundRandomSource : randomSource
+            );
+        }
+    }
+
+    @Nullable
+    private static MolangRandomSource randomSource(ExpressionBindingContext context, Object... values) {
+        return context != null ? context.bindRandomSource(values) : null;
     }
 }

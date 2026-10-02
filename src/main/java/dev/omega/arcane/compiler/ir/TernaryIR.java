@@ -54,11 +54,15 @@ public record TernaryIR(IR condition, IR trueValue, IR falseValue) implements IR
         Label endLabel = new Label();
         mv.visitJumpInsn(Opcodes.IFEQ, falseLabel);
 
+        var trueScope = ctx.enterBranch();
         ctx.emitIR(trueValue, mv);
+        ctx.exitBranch(trueScope);
         mv.visitJumpInsn(Opcodes.GOTO, endLabel);
 
         mv.visitLabel(falseLabel);
+        var falseScope = ctx.enterBranch();
         ctx.emitIR(falseValue, mv);
+        ctx.exitBranch(falseScope);
 
         mv.visitLabel(endLabel);
     }

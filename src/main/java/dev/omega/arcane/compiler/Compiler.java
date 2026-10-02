@@ -19,8 +19,7 @@ public final class Compiler {
     public static final String MOLANG_EXPRESSION_INTERNAL = "dev/omega/arcane/ast/MolangExpression";
     public static final String MOLANG_EXPRESSION_DESC = "L" + MOLANG_EXPRESSION_INTERNAL + ";";
     public static final String COMPILED_EVALUATOR_INTERNAL = "dev/omega/arcane/compiler/CompiledEvaluator";
-    public static final String RANDOM_FIELD_OWNER = "dev/omega/arcane/Molang";
-    public static final String RANDOM_FIELD_DESC = "Ljava/util/Random;";
+    public static final String RANDOM_METHOD_OWNER = "dev/omega/arcane/Molang";
     public static final String FLOAT_ACCESSOR_INTERNAL = "dev/omega/arcane/reference/FloatAccessor";
 
     public static final ExpressionClassLoader CLASS_LOADER = new ExpressionClassLoader(Compiler.class.getClassLoader());
@@ -51,14 +50,14 @@ public final class Compiler {
                     context.capturedCount()
             );
 
-            Constructor<?> constructor = CONSTRUCTOR_CACHE.get(shapeKey);
-            if (constructor == null) {
-                constructor = context.compileConstructor(rootIR);
-                Constructor<?> existing = CONSTRUCTOR_CACHE.putIfAbsent(shapeKey, constructor);
-                if (existing != null) {
-                    constructor = existing;
+            // One class per shape, even when threads compile the same new shape at once.
+            Constructor<?> constructor = CONSTRUCTOR_CACHE.computeIfAbsent(shapeKey, key -> {
+                try {
+                    return context.compileConstructor(rootIR);
+                } catch (ReflectiveOperationException exception) {
+                    throw new IllegalStateException(exception);
                 }
-            }
+            });
 
             CompiledEvaluator evaluator = context.instantiate(constructor);
 
