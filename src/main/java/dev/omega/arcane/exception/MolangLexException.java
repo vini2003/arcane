@@ -10,4 +10,8 @@ public class MolangLexException extends MolangException {
     public MolangLexException(String message) {
         super(message);
     }
+
+    public MolangLexException(String message, int start, int end) {
+        super(message, start, end);
+    }
 }

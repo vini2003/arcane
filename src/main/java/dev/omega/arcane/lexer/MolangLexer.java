@@ -90,14 +90,14 @@ public class MolangLexer {
                 if(tryConsume('&')) {
                     yield token(MolangTokenType.DOUBLE_AMPERSAND);
                 } else {
-                    throw new MolangLexException("Found operator '&' without a second '&' afterwards (bitwise operators not supported)");
+                    throw new MolangLexException("Found operator '&' without a second '&' afterwards (bitwise operators not supported)", start, start + 1);
                 }
             }
             case '|' -> {
                 if(tryConsume('|')) {
                     yield token(MolangTokenType.DOUBLE_PIPE);
                 } else {
-                    throw new MolangLexException("Found operator '|' without a second '||' afterwards (bitwise operators not supported)");
+                    throw new MolangLexException("Found operator '|' without a second '||' afterwards (bitwise operators not supported)", start, start + 1);
                 }
             }
             case '?' -> {
@@ -122,13 +122,14 @@ public class MolangLexer {
                 }
 
                 // Unknown
-                throw new MolangLexException("Failed to Lex input char: '" + input + "'");
+                throw new MolangLexException("Failed to Lex input char: '" + input + "'", start, start + 1);
             }
         };
     }
 
+    // The cursor rests on the token's last character.
     private MolangTokenInstance token(MolangTokenType type) {
-        return new MolangTokenInstance(type, text.substring(start, cursor));
+        return new MolangTokenInstance(type, text.substring(start, cursor + 1), null, start, cursor + 1);
     }
 
     private MolangTokenInstance string() throws MolangLexException {
@@ -136,16 +137,16 @@ public class MolangLexer {
         char last = ' ';
         do {
             if(isAtEnd()) {
-                throw new MolangLexException("Failed to close string starting at index " + start);
+                throw new MolangLexException("Failed to close string starting at index " + start, start, text.length());
             }
 
             last = consume();
         } while(last != '"');
 
-        return new MolangTokenInstance(MolangTokenType.STRING, text.substring(start, cursor), text.substring(start + 1, cursor - 1));
+        return new MolangTokenInstance(MolangTokenType.STRING, text.substring(start, cursor + 1), text.substring(start + 1, cursor), start, cursor + 1);
     }
 
-    private MolangTokenInstance number() {
+    private MolangTokenInstance number() throws MolangLexException {
         if(!isAtEnd()) {
             char next = peek();
             boolean hasFoundDecimal = false;
@@ -163,7 +164,16 @@ public class MolangLexer {
         }
 
         String lexeme = text.substring(start, cursor + 1);
-        return new MolangTokenInstance(MolangTokenType.NUMBER, lexeme, Float.parseFloat(lexeme));
+
+        // Character.isDigit accepts non-ASCII digits that Float.parseFloat rejects.
+        float value;
+        try {
+            value = Float.parseFloat(lexeme);
+        } catch (NumberFormatException exception) {
+            throw new MolangLexException("Failed to read number '" + lexeme + "'", start, cursor + 1);
+        }
+
+        return new MolangTokenInstance(MolangTokenType.NUMBER, lexeme, value, start, cursor + 1);
     }
 
     private MolangTokenInstance identifier() {
@@ -172,7 +182,7 @@ public class MolangLexer {
         }
 
         String lexeme = text.substring(start, cursor + 1);
-        return new MolangTokenInstance(MolangTokenType.IDENTIFIER, lexeme, lexeme);
+        return new MolangTokenInstance(MolangTokenType.IDENTIFIER, lexeme, lexeme, start, cursor + 1);
     }
 
     private boolean isAtEnd() {
@@ -189,7 +199,8 @@ public class MolangLexer {
     }
 
     private boolean tryConsume(char check) {
-        if(cursor >= text.length()) {
+        // A trailing '>', '<', '=' or '!' has nothing after it to pair with.
+        if(cursor + 1 >= text.length()) {
             return false;
         }
 
