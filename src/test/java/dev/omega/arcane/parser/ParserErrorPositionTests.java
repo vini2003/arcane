@@ -77,14 +77,12 @@ public class ParserErrorPositionTests {
 
     @Test
     public void ParseLeading_ReportsConsumedTokens() throws MolangLexException, MolangParseException {
-        Assertions.assertEquals(3, MolangParser.parseLeading(MolangLexer.lex("1 - 2 + 3")).consumedTokens());
+        Assertions.assertEquals(5, MolangParser.parseLeading(MolangLexer.lex("1 - 2 + 3")).consumedTokens());
         Assertions.assertEquals(5, MolangParser.parseLeading(MolangLexer.lex("1 + 2 - 3")).consumedTokens());
     }
 
     @Test
     public void Parse_ValidExpressions_EvaluateAsBefore() throws MolangLexException, MolangParseException {
-        // The ignored tail is long-standing behaviour; tooling flags it rather than the parser changing it.
-        Assertions.assertEquals(-1.0F, MolangParser.parse("1 - 2 + 3", MolangParser.FLAG_NONE).evaluate());
         Assertions.assertEquals(0.5F, MolangParser.parse("math.clamp(0.5, 0, 1)", MolangParser.FLAG_NONE).evaluate());
     }
 }

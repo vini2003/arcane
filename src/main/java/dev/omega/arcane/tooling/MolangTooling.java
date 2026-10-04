@@ -275,10 +275,6 @@ public final class MolangTooling {
         MolangTokenInstance last = tokens.get(tokens.size() - 1);
 
         var message = switch (first.type()) {
-            case PLUS -> "Arcane cannot add after subtracting at the same level and would ignore everything from here; "
-                    + "group the subtraction, e.g. (a - b) + c";
-            case STAR -> "Arcane cannot multiply after dividing at the same level and would ignore everything from here; "
-                    + "group the division, e.g. (a / b) * c";
             case SEMICOLON -> "Statements are not supported; Arcane would ignore everything from ';'";
             case EQUAL -> "Assignments are not supported; did you mean '=='?";
             case QUESTION_QUESTION -> "'??' is not supported; Arcane would ignore everything from here";

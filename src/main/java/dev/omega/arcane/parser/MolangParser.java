@@ -235,14 +235,11 @@ public class MolangParser {
     private MolangExpression term() throws MolangParseException {
         MolangExpression left = factor();
 
-        // +
-        while (match(PLUS)) {
-            left = new AdditionExpression(left, factor());
-        }
-
-        // -
-        while (match(MINUS)) {
-            left = new SubtractionExpression(left, factor());
+        // + and - share a precedence level, so one loop keeps "1 - 2 + 3" left-associative.
+        while (match(PLUS, MINUS)) {
+            MolangTokenInstance operator = previous();
+            MolangExpression right = factor();
+            left = operator.type() == PLUS ? new AdditionExpression(left, right) : new SubtractionExpression(left, right);
         }
 
         return left;
@@ -251,14 +248,11 @@ public class MolangParser {
     private MolangExpression factor() throws MolangParseException {
         MolangExpression left = unary();
 
-        // *
-        while (match(STAR)) {
-            left = new MultiplicationExpression(left, unary());
-        }
-
-        // /
-        while (match(SLASH)) {
-            left = new DivisionExpression(left, unary());
+        // * and / share a precedence level, as + and - do.
+        while (match(STAR, SLASH)) {
+            MolangTokenInstance operator = previous();
+            MolangExpression right = unary();
+            left = operator.type() == STAR ? new MultiplicationExpression(left, right) : new DivisionExpression(left, right);
         }
 
         return left;

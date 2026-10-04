@@ -59,8 +59,6 @@ public class MolangValidateTests {
 
     @Test
     public void Validate_TrailingTokens_CoverTheIgnoredText() {
-        assertError(MolangTooling.validate("1 - 2 + 3"), 6, 9, "(a - b) + c");
-        assertError(MolangTooling.validate("4 / 2 * 3"), 6, 9, "(a / b) * c");
         assertError(MolangTooling.validate("1 2"), 2, 3, "Unexpected '2'");
         assertError(MolangTooling.validate("v.a = 1"), 4, 7, "'=='");
         assertError(MolangTooling.validate("q.a; q.b"), 3, 8, "Statements");
